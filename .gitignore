@@ -1,0 +1,40 @@
+# Byte-compiled / cache
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Environments
+.venv/
+venv/
+env/
+.conda/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Packaging
+build/
+dist/
+*.egg-info/
+
+# Testing / type-checking caches
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# IDE
+.idea/
+
+# OS
+.DS_Store
+
+# Model weights / checkpoints (NAVSIM sensor blobs & metric caches live outside repo)
+*.ckpt
+*.pth
+*.pt
+
+# Logs
+*.log
+
+# 含个人信息，不建议进公开仓库
+info_SUyiqi.pdf

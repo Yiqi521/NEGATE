@@ -1,0 +1,4 @@
+defaults:
+  - scene_filter: navtrain_unprotected_turn
+
+data_split: trainval
