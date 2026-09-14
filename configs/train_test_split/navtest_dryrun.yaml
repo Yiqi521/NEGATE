@@ -1,0 +1,4 @@
+defaults:
+  - scene_filter: navtest_dryrun
+
+data_split: test

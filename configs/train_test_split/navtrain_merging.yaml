@@ -1,0 +1,4 @@
+defaults:
+  - scene_filter: navtrain_merging
+
+data_split: trainval
