@@ -20,7 +20,9 @@ from navsim.common.dataloader import SceneLoader
 from conservative_negatives.filters.pdm_eval import PDMEvaluator
 from conservative_negatives.generators.operators import generate_candidates, kinematic_ok, g2_speed_scale, advance_departure, _arc_length
 from conservative_negatives.definition.objective_criteria import (agent_tracks, gap_analysis, pet_of_candidate, rss_follow_ok,
-                                                                   near_stop_control, critical_gap_for, RAGLAND_85)
+                                                                   near_stop_control, critical_gap_for, RAGLAND_85, stop_line_types_near,
+                                                                   conflict_geometry, candidate_gap_verdict)
+from conservative_negatives.definition.occlusion import occlusion_verdict, ego_route_lane_ids
 
 SPLIT_DIR = {"navtest": "test", "navtrain": "trainval"}
 VEH = {"vehicle"}
@@ -90,6 +92,9 @@ def main():
     ap.add_argument("--t-c", type=float, default=None, help="临界间隙 [s]；缺省按运动类型与停车控制取 HCM 基准值")
     ap.add_argument("--pet-safe", type=float, default=1.5, help="候选轨迹 PET 安全阈值 [s]")
     ap.add_argument("--future-frames", type=int, default=20)
+    ap.add_argument("--no-occlusion", action="store_true", help="关闭 O7 遮挡可达性判据")
+    ap.add_argument("--occ-rho", type=float, default=1.0, help="O7 响应时间 [s]")
+    ap.add_argument("--occ-vlim-factor", type=float, default=1.1, help="O7 幻影车速度 = factor × 车道限速")
     a = ap.parse_args()
 
     df = pd.read_parquet(a.flags)
@@ -158,11 +163,27 @@ def main():
                 decisive_safe = (n_rej == 0) and gsc["conflict"] and (gsc["pet_expert_s"] is not None) and (gsc["pet_expert_s"] >= a.pet_safe)
                 scene_unjustified = (not gsc["conflict"]) or (gsc["first_gap_ge_tc_s"] == 0.0) or decisive_safe
                 rss_ok_e, rss_r_e = rss_follow_ok(scene, exp, expert_poses=exp)
+                conf_geo = conflict_geometry(exp_long, tracks)
+                # O7 遮挡可达性：沿专家（果断）轨迹检查地图冲突点的视距是否足够
+                if a.no_occlusion:
+                    occ = None
+                else:
+                    occ = occlusion_verdict(scene, exp_long, ego_route_lane_ids(scene),
+                                            v_lim_factor=a.occ_vlim_factor, rho=a.occ_rho)
                 obj = dict(expert_category=cat, scene_unjustified=scene_unjustified, first_gap_ge_tc_s=gsc["first_gap_ge_tc_s"],
+                           conf_geo=conf_geo, gaps_intervals=gsc["gaps_intervals"], expert_gap_interval=gsc["expert_gap_interval"], t_c=t_c,
                            max_rejected_gap_s=gsc["max_rejected_gap_s"], pet_expert_s=gsc["pet_expert_s"], t_c_used=t_c,
-                           stop_controlled=stop_ctrl, expert_strong_over_conservative=strong_over,
-                           rss_ok_expert=rss_ok_e, rss_ratio_expert=rss_r_e, tracks=tracks)
+                           stop_controlled=stop_ctrl, stop_line_types=str(stop_line_types_near(scene)), expert_strong_over_conservative=strong_over,
+                           rss_ok_expert=rss_ok_e, rss_ratio_expert=rss_r_e,
+                           occ_justified=bool(occ.justified) if occ else False,
+                           occ_reason=occ.reason if occ else "disabled",
+                           occ_d_occ_m=occ.d_occ_m if occ else None,
+                           occ_t_phantom_s=occ.t_phantom_s if occ else None,
+                           occ_t_clear_s=occ.t_clear_s if occ else None,
+                           tracks=tracks)
+                # 场景级值仅作记录；最终 O6 在候选级判定（见下）
                 c3_pass = bool(e.safe() and scene_unjustified)
+                expert_pet_ok = gsc["pet_expert_s"] is None or gsc["pet_expert_s"] >= a.pet_safe
             else:
                 c3_pass = c3_replay
             ccs = conflict_clear_time(scene)
@@ -173,12 +194,12 @@ def main():
                         exp_nc=e.nc, exp_dac=e.dac, exp_ttc=e.ttc, exp_ep=e.ep, exp_pdms=e.pdms,
                         fast_nc=fast.nc, fast_ttc=fast.ttc, fast_dac=fast.dac, c3_ref=("advance" if v0 < 0.5 else "scale"), ref_min_gap_s=ref_gap, exp_min_gap_s=exp_gap, c3_ref_safe=ref_safe, c3_gap_ok=gap_ok,
                         c3_replay=c3_replay, c3_pass=c3_pass,
-                        **({k: v for k, v in obj.items() if k != "tracks"} if obj else {}))
+                        **({k: v for k, v in obj.items() if k not in ("tracks", "conf_geo", "gaps_intervals", "expert_gap_interval", "t_c")} if obj else {}))
             for c in generate_candidates(exp, conflict_clear_s=ccs, ego_speed_t0=v0):
                 r = dict(base, operator=c.operator, params=str(c.params))
                 r["kin_ok"] = kinematic_ok(c.poses)
                 if not r["kin_ok"]:
-                    r.update(c1=False, c2=False, c4=False, is_negative=False); rows.append(r); continue
+                    r.update(c1=False, c2=False, c4=False, is_negative=False, is_negative_strict=False); rows.append(r); continue
                 s = ev.score(tok, c.poses)
                 ep_ratio = s.ep / max(e.ep, 1e-6)
                 ade = float(np.mean(np.linalg.norm(c.poses[:, :2] - exp[:, :2], axis=1)))
@@ -187,13 +208,20 @@ def main():
                          ep_ratio=ep_ratio, ade=ade, fde=fde,
                          c1=s.safe(), c2=ep_ratio <= a.c2_ep_ratio, c4=ep_ratio >= a.c4_min_ep_ratio)
                 if obj is not None:
-                    pet_c = pet_of_candidate(c.poses, obj["tracks"]); rss_c, rss_r = rss_follow_ok(scene, c.poses, expert_poses=exp)
-                    r.update(pet_candidate_s=pet_c, rss_ok_candidate=rss_c, rss_ratio_candidate=rss_r)
+                    verdict = candidate_gap_verdict(c.poses, obj["conf_geo"], obj["gaps_intervals"], obj["t_c"], a.pet_safe, obj["expert_gap_interval"])
+                    pet_c = verdict["cand_pet_s"]; rss_c, rss_r = rss_follow_ok(scene, c.poses, expert_poses=exp)
+                    r.update(pet_candidate_s=pet_c, rss_ok_candidate=rss_c, rss_ratio_candidate=rss_r,
+                             cand_reached=verdict["cand_reached"], cand_arrival_s=verdict["cand_arrival_s"], cand_reason=verdict["cand_reason"])
                     # RSS 相对判据：候选的 RSS 裕度不低于专家（排队等场景中专家自身也可能不满足绝对 RSS）
                     rss_rel_ok = bool(rss_c or rss_r >= min(1.0, obj["rss_ratio_expert"]) - 1e-6)
                     r["rss_rel_ok"] = rss_rel_ok
                     r["c1_obj"] = bool((pet_c is None or pet_c >= a.pet_safe) and rss_rel_ok)
-                    r["is_negative"] = bool(r["c1"] and r["c1_obj"] and r["c2"] and c3_pass and r["c4"])
+                    # 候选级 O6：专家自身在冲突点安全（PET）∧ 候选的延迟无理由
+                    r["c3_cand"] = bool(e.safe() and expert_pet_ok and verdict["cand_unjustified"])
+                    # O7：遮挡使谨慎有理由 → 该场景不产生负样本
+                    r["c7_occ_ok"] = bool(not obj["occ_justified"])
+                    r["is_negative"] = bool(r["c1"] and r["c1_obj"] and r["c2"] and r["c3_cand"] and r["c4"] and r["c7_occ_ok"])
+                    r["is_negative_strict"] = bool(r["is_negative"] and c3_replay)
                 else:
                     r["is_negative"] = bool(r["c1"] and r["c2"] and c3_pass and r["c4"])
                 rows.append(r)
@@ -215,6 +243,12 @@ def main():
     print("negatives:", int(out.is_negative.sum()), "; scenes with >=1 negative:",
           int(out.groupby('token').is_negative.any().sum()), "/", out.token.nunique())
     print("per operator negative counts:", out[out.is_negative].operator.value_counts().to_dict())
+    if "cand_reason" in out:
+        print("candidate O6 reasons (kin ok):", out[out.kin_ok].cand_reason.value_counts().to_dict())
+        sc_o = out.groupby("token").first()
+        print("O7 occlusion: justified scenes", int(sc_o.occ_justified.sum()), f"({100*sc_o.occ_justified.mean():.1f}%)",
+              "| reasons", sc_o.occ_reason.value_counts().to_dict())
+        print("strict negatives:", int(out.is_negative_strict.sum()), "; scenes:", int(out.groupby('token').is_negative_strict.any().sum()))
     print("ep_ratio quantiles (kin ok):", k.ep_ratio.quantile([.1, .25, .5, .75, .9]).round(2).to_dict())
     print("ade quantiles (negatives):", out[out.is_negative].ade.quantile([.25, .5, .75]).round(2).to_dict())
 

@@ -60,6 +60,43 @@ def summarize(runs, strat, name):
     return pd.DataFrame(rows)
 
 
+BEHAVIOR_COLS = {"unnecessary_stop": "不必要停车率%", "startup_delay_delta_s": "起步延迟Δs", "gap_accepted": "间隙接受率%"}
+
+
+def report_behavior(paths, reference, strat):
+    """按层汇报三个行为指标：各种子均值 ± 种子间标准差，并与人类参照组对比。"""
+    runs = []
+    for i, p in enumerate(paths):
+        d = pd.read_csv(p) if str(p).endswith(".csv") else pd.read_parquet(p)
+        d["seed"] = i
+        runs.append(d)
+    b = pd.concat(runs, ignore_index=True)
+    ref = None
+    if reference is not None:
+        ref = pd.read_parquet(reference) if str(reference).endswith(".parquet") else pd.read_csv(reference)
+
+    print("\n== 行为指标（按层；均值 ± 种子间标准差；括号为人类专家）==")
+    header = f"{'stratum':22s} {'n':>6s} " + " ".join(f"{v:>24s}" for v in BEHAVIOR_COLS.values())
+    print(header)
+    for sname, toks in strat.items():
+        sub = b[b.token.isin(toks)]
+        if sub.empty:
+            continue
+        line = f"{sname:22s} {sub.token.nunique():6d} "
+        for col in BEHAVIOR_COLS:
+            per_seed = sub.groupby("seed")[col].mean()
+            scale = 100.0 if col != "startup_delay_delta_s" else 1.0
+            m, sd = scale * per_seed.mean(), scale * per_seed.std(ddof=0)
+            n_eff = int(sub.groupby("seed")[col].count().mean())
+            cell = f"{m:6.2f}±{sd:4.2f} n={n_eff}"
+            if ref is not None:
+                r = ref[ref.token.isin(toks)][col]
+                if r.notna().any():
+                    cell += f"|{scale * r.mean():.0f}"
+            line += f" {cell:>24s}"
+        print(line)
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--runs", nargs="+", type=Path, required=True)
@@ -67,6 +104,9 @@ def main():
     ap.add_argument("--flags", type=Path, required=True)
     ap.add_argument("--negatives", type=Path, default=None)
     ap.add_argument("--out", type=Path, default=None)
+    ap.add_argument("--behavior", nargs="*", type=Path, default=None,
+                    help="eval/behavior_metrics.py 的逐种子输出，按层汇报三个行为指标")
+    ap.add_argument("--behavior-reference", type=Path, default=None, help="人类专家参照组的行为指标")
     a = ap.parse_args()
     flags = pd.read_parquet(a.flags); negs = pd.read_parquet(a.negatives) if a.negatives else None
     strat = strata(flags, negs)
@@ -86,6 +126,8 @@ def main():
                 lo, hi = boot_ci(d[m].values); line += f"| {m[:12]} {100*d[m].mean():+5.2f} [{100*lo:+5.2f},{100*hi:+5.2f}] "
                 if m in SAFETY and hi < 0: reject = True
             print(line + ("  <-- 安全子项显著劣化，拒绝" if reject else ""))
+    if a.behavior:
+        report_behavior(a.behavior, a.behavior_reference, strat)
     pd.set_option("display.width", 200)
     cols = ["run", "stratum", "n_scenes", "n_seeds"] + [c for c in SUB]
     print("\n== 分层均值（%）==\n", out[cols].round(2).to_string(index=False))

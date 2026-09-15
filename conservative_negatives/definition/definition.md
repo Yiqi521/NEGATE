@@ -132,3 +132,9 @@
 
 - C3 场景级通过率 0.926；专家保守性标记 1,336 / 9,725（13.7%）。13 个场景因缺少 metric cache 被跳过（9,738 − 9,725）。
 - 文件：`results/negatives_navtrain_v1.parquet`（4.3 MB）。NegativeBank（K = 4）：8,487 token，平均 3.27 条，53% 满 4 条。
+
+## 最终定义（v12，2026-09-14）——客观判据版
+详见 `docs/objective_criteria.md`。负样本 `is_negative` = O1 回放安全 ∧ O2 PET ≥ 1.5 s ∧ O3 相对 RSS ∧ O4 EP 比 ≤ 0.8 ∧ O5 EP 比 ≥ 0.3 ∧ O6 候选级间隙接受（无冲突 / 在间隙内安全通过 / 拒绝了 ≥ t_c 的可接受间隙）；
+**训练用 `is_negative_strict`** 另要求回放参考检查通过。t_c 按 HCM 运动类型与停车控制选取（4.1 / 6.2 / 6.5 / 7.1 s）；观测窗 10 s。
+正式文件：`results/negatives_navtest_v12.parquet`（3,463 strict / 942 场景）、`results/labels/negatives_navtrain.parquet`（v5：20,799 strict / 5,819 场景，含 O7 遮挡判据）；
+navtest 为 `results/labels/negatives_navtest.parquet`（v13：2,783 strict / 742 场景）。

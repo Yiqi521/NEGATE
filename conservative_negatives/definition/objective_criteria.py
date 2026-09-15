@@ -91,24 +91,41 @@ def _arrival_time_along_path(pts: np.ndarray, t: np.ndarray, point: np.ndarray) 
 
 
 def crossing_conflicts(poses: np.ndarray, tracks: Dict[str, np.ndarray], cross_dist: float = 2.5,
-                       ahead_min_m: float = 1.0) -> List[dict]:
-    """找出其未来位置与自车路径交汇（距离 < cross_dist）的他车；返回每辆车的冲突点、他车到达时刻与自车到达时刻。"""
+                       ahead_min_m: float = 1.0, entry_dist: float = 5.0) -> List[dict]:
+    """找出"从路径外进入自车路径"的他车（穿越、对向、汇入车流），返回冲突点、他车与自车到达时刻。
+    规则：他车在 t0（首个有效帧）距自车路径 ≥ entry_dist，之后进入 < cross_dist；排除始终贴近路径的同流车辆（前车）。
+    相邻车道平行行驶的车在 t0 即在 entry_dist 内，因而不计入——它们不是间隙接受问题。方向夹角只记录不过滤，
+    以保留右转 / 换道汇入这类同向间隙接受冲突。"""
     pts, t = _path_times(poses)
+    tang = np.diff(pts, axis=0); tang = np.concatenate([tang[:1], tang], axis=0)
     out = []
     for tok, tr in tracks.items():
         valid = ~np.isnan(tr[:, 0])
         if valid.sum() < 2:
             continue
-        # 他车各时刻到自车路径的最近距离
-        d = np.linalg.norm(tr[valid][:, None, :] - pts[None, :, :], axis=-1)   # (Tk, N)
-        k_idx = np.where(valid)[0]
+        trv = tr[valid]; k_idx = np.where(valid)[0]
+        d = np.linalg.norm(trv[:, None, :] - pts[None, :, :], axis=-1)   # (Tk, N)
+        dmin_t = d.min(axis=1)                                           # 各时刻到路径的最近距离
         kk, ii = np.unravel_index(np.argmin(d), d.shape)
-        if d[kk, ii] > cross_dist or pts[ii, 0] < ahead_min_m:      # 不交汇或冲突点在自车后方
+        if d[kk, ii] > cross_dist or pts[ii, 0] < ahead_min_m:
             continue
-        # 排除与自车同向且始终在同一路径上的前车（跟驰，不属于穿越冲突）：他车在所有帧都靠近路径则视为同流
-        same_stream = np.mean(d.min(axis=1) < cross_dist) > 0.8
+        if dmin_t[0] < entry_dist:            # t0 已在路径走廊附近：前车 / 相邻车道平行车 / 停在冲突区的车 → 非间隙接受冲突
+            continue
+        same_stream = np.mean(dmin_t < cross_dist) > 0.8
+        if same_stream:
+            continue
+        j0, j1 = max(0, kk - 1), min(len(trv) - 1, kk + 1)
+        disp = trv[j1] - trv[j0]; tg = tang[ii]
+        if np.linalg.norm(disp) < 0.3:
+            angle = 90.0
+        else:
+            angle = float(np.degrees(np.arccos(np.clip(np.dot(disp, tg) / (np.linalg.norm(disp) * (np.linalg.norm(tg) + 1e-9)), -1.0, 1.0))))
+        # 跟随车排除：t0 位于自车正后方（纵向 < 0、横向 < 3 m）且同向 → 沿同一路径跟随，不是间隙接受对象
+        x0, y0 = trv[0]
+        if x0 < 0 and abs(y0) < 3.0 and angle < 30.0:
+            continue
         out.append(dict(track=tok, conflict_xy=pts[ii], agent_arrival_s=float(k_idx[kk] * DT),
-                        ego_arrival_s=float(t[ii]), same_stream=bool(same_stream)))
+                        ego_arrival_s=float(t[ii]), cross_angle_deg=angle, entry_dist_t0=float(dmin_t[0]), same_stream=False))
     return out
 
 
@@ -118,7 +135,7 @@ def gap_analysis(poses_expert: np.ndarray, tracks: Dict[str, np.ndarray], t_c: f
     poses_expert 可为 10 s（20 帧）轨迹以覆盖临界间隙；horizon_s 默认 = 轨迹时长。"""
     horizon_s = horizon_s or len(poses_expert) * DT
     conf = [c for c in crossing_conflicts(poses_expert, tracks) if not c["same_stream"]]
-    res = dict(conflict=bool(conf), n_conflict_agents=len(conf), gaps_s=[], gaps_censored=[], expert_accepted_gap_s=None,
+    res = dict(conflict=bool(conf), n_conflict_agents=len(conf), gaps_s=[], gaps_censored=[], gaps_intervals=[], expert_gap_interval=None, expert_accepted_gap_s=None,
                expert_reached_conflict=None, expert_arrival_s=None, expert_rejected_gaps_s=[], max_rejected_gap_s=None,
                pet_expert_s=None, gap_open_at_s=None, first_gap_ge_tc_s=None)
     if not conf:
@@ -139,6 +156,8 @@ def gap_analysis(poses_expert: np.ndarray, tracks: Dict[str, np.ndarray], t_c: f
         elif b <= ego_t or not res["expert_reached_conflict"]:
             rej.append(b - a)          # 截断区间的长度是真实间隙的下界，用于 ≥ t_c 判定仍然成立
     res["expert_accepted_gap_s"] = acc
+    res["gaps_intervals"] = [(float(a), float(b)) for a, b in gaps]
+    res["expert_gap_interval"] = next(((float(a), float(b)) for a, b in gaps if a <= ego_t < b), None)
     res["expert_rejected_gaps_s"] = [round(g, 2) for g in rej]
     res["max_rejected_gap_s"] = max(rej) if rej else None
     res["pet_expert_s"] = float(min(abs(ego_t - a) for a in arrivals)) if res["expert_reached_conflict"] else None
@@ -147,6 +166,50 @@ def gap_analysis(poses_expert: np.ndarray, tracks: Dict[str, np.ndarray], t_c: f
             res["first_gap_ge_tc_s"] = a; break
     res["gap_open_at_s"] = res["first_gap_ge_tc_s"]
     return res
+
+
+def conflict_geometry(poses_long: np.ndarray, tracks: Dict[str, np.ndarray]) -> List[dict]:
+    """在专家长视界路径上找冲突点，并给出各冲突点的弧长 s_c 与他车到达时刻（供共路径候选按弧长计算到达时刻）。"""
+    conf = crossing_conflicts(poses_long, tracks)
+    if not conf:
+        return []
+    pts, _ = _path_times(poses_long)
+    seg = np.linalg.norm(np.diff(pts, axis=0), axis=1); s_path = np.concatenate([[0.0], np.cumsum(seg)])
+    for c in conf:
+        i = int(np.argmin(np.linalg.norm(pts - c["conflict_xy"][None, :], axis=1)))
+        c["s_conflict_m"] = float(s_path[i])
+    return conf
+
+
+def candidate_arrival_at(poses_cand: np.ndarray, s_target: float) -> Optional[float]:
+    """共路径候选到达弧长 s_target 的时刻（线性插值）；4 s 内未到达返回 None。"""
+    pts, t = _path_times(poses_cand)
+    s = np.concatenate([[0.0], np.cumsum(np.linalg.norm(np.diff(pts, axis=0), axis=1))])
+    if s[-1] < s_target - 1e-6:
+        return None
+    return float(np.interp(s_target, s, t))
+
+
+def candidate_gap_verdict(poses_cand: np.ndarray, conf: List[dict], gaps: List[Tuple[float, float]], t_c: float,
+                          pet_safe: float, expert_gap: Optional[Tuple[float, float]]) -> dict:
+    """候选级 O6：
+    - 无冲突 → 无理由（可作负样本）
+    - 候选在 4 s 内到达冲突点：PET ≥ pet_safe 则其额外延迟无理由；PET 不足 → 不安全（交给 O2 排除）
+    - 候选未到达（停等）：若专家所用间隙 ≥ t_c 或 t0 已有 ≥ t_c 间隙 → 拒绝了可接受间隙，无理由；否则谨慎有理由"""
+    if not conf:
+        return dict(cand_reached=None, cand_arrival_s=None, cand_pet_s=None, cand_unjustified=True, cand_reason="no_conflict")
+    s_c = min(c["s_conflict_m"] for c in conf)
+    arrivals = sorted(set(c["agent_arrival_s"] for c in conf))
+    t_arr = candidate_arrival_at(poses_cand, s_c)
+    if t_arr is not None:
+        pet = float(min(abs(t_arr - a) for a in arrivals))
+        return dict(cand_reached=True, cand_arrival_s=t_arr, cand_pet_s=pet, cand_unjustified=bool(pet >= pet_safe),
+                    cand_reason="crossed_in_gap" if pet >= pet_safe else "unsafe_pet")
+    first_tc_at0 = any((b - a) >= t_c and a == 0.0 for a, b in gaps)
+    expert_gap_ok = expert_gap is not None and (expert_gap[1] - expert_gap[0]) >= t_c
+    unj = bool(first_tc_at0 or expert_gap_ok)
+    return dict(cand_reached=False, cand_arrival_s=None, cand_pet_s=None, cand_unjustified=unj,
+                cand_reason="rejected_acceptable_gap" if unj else "waiting_no_acceptable_gap")
 
 
 def pet_of_candidate(poses_cand: np.ndarray, tracks: Dict[str, np.ndarray]) -> Optional[float]:
@@ -201,28 +264,55 @@ HCM_TC = {  # HCM 6th ed. Ch. 20 基准临界间隙 [s]（两车道主路）
 RAGLAND_85 = 8.6   # Ragland et al. 2006：85% 人类驾驶员接受的对向间隙（无保护左转）
 
 
-def near_stop_control(scene, radius: float = 12.0) -> bool:
-    """t0 自车前方 radius 内是否有 STOP_SIGN / STOP_LINE / YIELD 地图要素（支路进口的标志）。"""
+def _stop_line_type_name(o) -> str:
+    """nuPlan 的 stop_line_type 返回 numpy.int64；转换为 StopLineType 枚举名。"""
+    from nuplan.common.maps.maps_datatypes import StopLineType
+    v = getattr(o, "stop_line_type", None)
+    try:
+        return StopLineType(int(v)).name
+    except Exception:
+        return str(v).split(".")[-1].upper()
+
+
+def near_stop_control(scene, radius: float = 12.0, lat_max: float = 4.0) -> bool:
+    """t0 自车前方 radius 内是否有停车/让行类停止线（nuPlan 地图：STOP_SIGN / YIELD / TRAFFIC_LIGHT 层的邻近查询不受支持，
+    只能用 STOP_LINE 层 + stop_line_type）。信号灯类与人行横道类停止线不算停车控制。"""
     from nuplan.common.actor_state.state_representation import Point2D
     from nuplan.common.maps.maps_datatypes import SemanticMapLayer
     t0 = scene.scene_metadata.num_history_frames - 1
     x, y, yaw = scene.frames[t0].ego_status.ego_pose
-    layers = [SemanticMapLayer.STOP_SIGN, SemanticMapLayer.STOP_LINE, SemanticMapLayer.YIELD]
     try:
-        objs = scene.map_api.get_proximal_map_objects(Point2D(x, y), radius, layers)
+        objs = scene.map_api.get_proximal_map_objects(Point2D(x, y), radius, [SemanticMapLayer.STOP_LINE])[SemanticMapLayer.STOP_LINE]
     except Exception:
         return False
     c, s_ = np.cos(-yaw), np.sin(-yaw)
-    for layer in layers:
-        for o in objs.get(layer, []):
-            try:
-                cx, cy = o.polygon.centroid.x, o.polygon.centroid.y
-            except Exception:
-                continue
-            lon = c * (cx - x) - s_ * (cy - y)
-            if -3.0 <= lon <= radius:
-                return True
+    for o in objs:
+        try:
+            tname = _stop_line_type_name(o)
+            cx, cy = o.polygon.centroid.x, o.polygon.centroid.y
+        except Exception:
+            continue
+        if "TRAFFIC_LIGHT" in tname or "PED" in tname or "CROSS" in tname:
+            continue
+        if not any(k in tname for k in ("STOP", "YIELD", "TURN")):
+            continue
+        lon = c * (cx - x) - s_ * (cy - y); lat = s_ * (cx - x) + c * (cy - y)
+        if -3.0 <= lon <= radius and abs(lat) <= lat_max:
+            return True
     return False
+
+
+def stop_line_types_near(scene, radius: float = 12.0) -> List[str]:
+    """诊断用：返回自车附近停止线类型名列表。"""
+    from nuplan.common.actor_state.state_representation import Point2D
+    from nuplan.common.maps.maps_datatypes import SemanticMapLayer
+    t0 = scene.scene_metadata.num_history_frames - 1
+    x, y, _ = scene.frames[t0].ego_status.ego_pose
+    try:
+        objs = scene.map_api.get_proximal_map_objects(Point2D(x, y), radius, [SemanticMapLayer.STOP_LINE])[SemanticMapLayer.STOP_LINE]
+    except Exception:
+        return []
+    return [_stop_line_type_name(o) for o in objs]
 
 
 def critical_gap_for(turn_type: Optional[str], stop_controlled: bool) -> float:
