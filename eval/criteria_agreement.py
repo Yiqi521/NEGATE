@@ -2,8 +2,10 @@
 """判据间一致性：把每个客观判据视为独立"算法标注者"，在场景级 / 候选级计算两两 Cohen κ 与 Fleiss κ。
 
 场景级标注者（"该场景中放慢/等待是否无正当理由"）：
-  A_replay = c3_replay（非反应式回放 + 恒速外推间隙）
-  A_gap    = O6（HCM 间隙接受：无冲突 ∨ t0 有 ≥ t_c 间隙 ∨ 专家果断且 PET 达标）
+  A_replay    = c3_replay（非反应式回放 + 恒速外推间隙）
+  A_gap       = O6（HCM 间隙接受，看得见的车流）
+  A_occlusion = ¬O7（遮挡可达性，看不见的车流；幻影车先到则有理由）
+  A_expert    = 专家四分类中的非 justified_wait
 候选级标注者（"该候选是否安全"）：
   S_replay = c1（NC=DAC=TTC=1）       S_pet = PET ≥ τ       S_rss = RSS 满足
 用法: python eval/criteria_agreement.py --negatives results/negatives_navtest_v7.parquet [--out results/criteria_agreement_v7.csv]
@@ -31,6 +33,8 @@ def main():
     A = pd.DataFrame({"replay": sc.c3_replay.astype(bool), "gap_HCM": sc.c3_pass.astype(bool)})
     if "expert_category" in sc:
         A["expert_not_justified"] = sc.expert_category.isin(["no_conflict", "decisive", "over_conservative"])
+    if "occ_justified" in sc:
+        A["occlusion_not_justified"] = ~sc.occ_justified.fillna(False).astype(bool)
     print(f"== 场景级（n={len(A)}）：'无正当理由' 标注者两两 κ ==")
     for i in A.columns:
         for j in A.columns:
@@ -40,6 +44,13 @@ def main():
                 rows.append(dict(level="scene", a=i, b=j, kappa=kap, agreement=agr))
     M = np.stack([A.sum(axis=1).values, (A.shape[1] - A.sum(axis=1)).values], axis=1)
     print(f"  Fleiss κ（{A.shape[1]} 标注者）= {fleiss_kappa(M):.3f}")
+    # 互补型判据的正确统计量：各机制"独占拒绝"的场景数（κ 只适用于同构念的重复测量）
+    rej = ~A                       # True = 该机制判"有正当理由"（拒绝作负样本）
+    print("\n  各机制拒绝情况（True = 判为有正当理由）：")
+    for c in rej.columns:
+        others = rej.drop(columns=[c]).any(axis=1)
+        print(f"    {c:24s} 拒绝 {int(rej[c].sum()):4d}  其中仅此机制拒绝 {int((rej[c] & ~others).sum()):4d}")
+    print(f"    {'任一机制拒绝':24s} {int(rej.any(axis=1).sum()):4d}  全部机制都拒绝 {int(rej.all(axis=1).sum()):4d}  均不拒绝 {int((~rej.any(axis=1)).sum()):4d}")
     # ---- 候选级 ----
     k = d[d.kin_ok & d.c1.notna()].copy()
     if "pet_candidate_s" in k:
