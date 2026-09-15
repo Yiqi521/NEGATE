@@ -1,0 +1,10 @@
+level,a,b,kappa,agreement
+scene,gap_HCM,replay,0.0665796344647519,0.9253588516746412
+scene,gap_HCM,occlusion_not_justified,0.08313658152679404,0.7770334928229665
+scene,expert_not_justified,replay,0.0665796344647519,0.9253588516746412
+scene,expert_not_justified,gap_HCM,1.0,1.0
+scene,expert_not_justified,occlusion_not_justified,0.08313658152679404,0.7770334928229665
+scene,occlusion_not_justified,replay,0.0740474650956725,0.7521531100478469
+candidate,PET,replay_NC_DAC_TTC,0.0052170544925175255,0.9594477998274374
+candidate,PET,RSS,-0.0031980978270316207,0.9920429489023104
+candidate,RSS,replay_NC_DAC_TTC,-0.001409995692375432,0.9559006806634072
