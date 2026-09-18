@@ -53,7 +53,7 @@
 | 显存峰值 batch 4/8/16/32（前向+反向+Adam） | 1.38 / 2.33 / 3.67 / 6.36 GB | 1.52 / 2.22 / 3.65 / 6.41 GB |
 | 步时 batch 32 | 0.99 s（含首步预热） | 0.51 s（预热后 3 步均值；两次测量口径不同，仅说明 cu128 不更慢） |
 | 训练冒烟（navtest 有负样本的 48 场景，2 epoch，batch 8 × 累积 4） | — | 通过：40 训练 / 8 验证样本；loss_neg 0.35，neg_active_frac 0.43–0.45，每批有效负样本 23.4，λ_eff 0.8 → 1.0；ckpt 与 latest.ckpt 链接生成 |
-| LTF 三种子 navtest 全量 PDMS | 84.1 / 83.1 / 83.3（均 83.5 ± 0.45） | 待填 |
+| LTF 三种子 navtest 全量 PDMS | 84.136 / 83.080 / 83.341（均 83.5 ± 0.45） | 84.136 / 83.080 / 83.341；逐 token PDMS 与子分数最大差 0.00000；七个分层均值逐位一致 |
 | 打包 | — | `environment-cu128.yml`（含 cu128 额外索引；navsim / nuplan-devkit 需按文件头注释另装）、`requirements-cu128.txt` + `.lock.txt`、`Dockerfile` → 镜像 `negate:cu128`（22.2 GB；基础镜像 nvidia/cuda:12.8.1-cudnn-runtime-ubuntu22.04 + Miniforge）。容器内 GPU 测试通过：torch 2.7.1+cu128，架构含 sm_120；容器内 LTF 40 场景 dry-run PDMS 0.9794 与主机一致 |
 
 安装步骤（已脚本化于 Dockerfile；**顺序很重要**）：`conda create -n navsim-cu128 python=3.9` → `pip install -r requirements-cu128.txt`（navsim 依赖去掉 torch/torchvision 钉死行）→ `pip install --no-deps nuplan-devkit@v1.2` → **`pip install --no-deps -e navsim`** → **最后** `pip install torch==2.7.1 torchvision==0.22.1 --index-url https://download.pytorch.org/whl/cu128` → 断言 `torch.__version__` 以 2.7.1 开头且 `sm_120` 在架构列表中。
