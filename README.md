@@ -17,6 +17,8 @@
 | `conservative_negatives/definition/objective_criteria.py` | 客观判据 O1–O6：间隙接受、PET、RSS、起步延迟（替代人工标注） |
 | `conservative_negatives/definition/occlusion.py` | 客观判据 O7：遮挡可达性（幻影车），处理"看不见的来车方向" |
 | `conservative_negatives/tracking.py` | 实验追踪：零依赖本地记录 + 可选 TensorBoard / W&B / MLflow 镜像 |
+| `conservative_negatives/train/negaug_agent.py` | **通用适配器**：给任意 NAVSIM 智能体附加负样本目标与分离损失（宿主零改动） |
+| `configs/agent/ltf_negaug.yaml` | 适配器 × LTF 的 Hydra 配置（λ、损失形式、错位对照、微调起点） |
 | `results/labels/` | **稳定标签目录**（下游一律引用这里的固定文件名） |
 | `configs/scene_filter/*.yaml` | 自动生成的子集 token 列表（可直接作 NAVSIM scene_filter） |
 | `configs/agent/ltf_camera_only.yaml` | 纯相机 LTF 的 Hydra 配置 |
@@ -38,6 +40,8 @@ export PYTHONPATH=$PWD                    # 使 conservative_negatives 可导入
 | `scripts/build_negatives.py --split navtest --flags ... --subset interact --out ...` | 生成负样本候选并做 C1–C4 过滤 | metric cache |
 | `scripts/render_review_sample.py` | 为人工抽检样本渲染 BEV 图 | 元数据 + 地图 |
 | `scripts/eval_ltf_navtest.sh <seed>` | 官方 LTF 权重在 navtest 上的基线评估 | 相机 blob + metric cache |
+| `scripts/build_finetune_subset.py` | 按本地已下载日志构建微调子集（交互 + 背景）并生成 scene_filter | 元数据 + 标签 |
+| `scripts/run_negaug_finetune.sh <run> <λ> [shuffle]` | 最小验证实验：LTF 微调（batch 32 × 累积 2，10 epoch） | navtrain 传感器（1 个压缩包） + 标签 |
 | `scripts/eval_ltf_all.sh` | LTF 3 seeds 全量评估 + 分层统计一键脚本 | 相机 blob + metric cache |
 | `scripts/merge_shards.py` | 合并分片构建结果 | — |
 | `eval/stratified_pdms.py --runs ... --flags ... [--baseline ...] [--behavior ...]` | 分层 PDMS、bootstrap CI、配对差异、拒绝准则、行为指标 | run_pdm_score 的 CSV |

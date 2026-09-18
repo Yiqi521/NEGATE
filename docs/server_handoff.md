@@ -30,11 +30,25 @@ python $NAVSIM_DEVKIT_ROOT/navsim/planning/script/run_pdm_score.py --config-dir 
 # 3) 负样本训练（Step 4）：接入 conservative_negatives/losses/separation_loss.py，见第 4 节
 ```
 
-## 4. 训练接入设计（待实现，服务器上）
-- **数据侧**：`NegativeBank`（token → (K,8,3) 负样本 + mask），从 `results/labels/negatives_navtrain.parquet` 读取（`label_col="is_negative_strict"`）；K = 4，不足补零。在 TransFuser 的 `TargetBuilder` 中按 token 附加 `negatives`、`neg_mask` 两个 target。
-- **损失侧**：`compute_loss` 中在官方 `transfuser_loss` 之外加 `λ_neg(step) · SeparationLoss(pred_traj, gt_traj, negatives, neg_mask)`，`λ_neg ∈ {0.05, 0.1, 0.2, 0.3}`，前 20% step 线性 warm-up；日志记录 `neg_active_frac`（< 1e-3 持续则触发 R6）。
-- **样本激活**：只有 token ∈ navtrain_interact 且有通过 C1–C4 的负样本时 `neg_mask` 为真；其余帧损失为 0。
-- **打分型平行基线**：GTRS 仓库中的 Hydra-MDP（V2-99）依赖 NAVSIM v2，需先确认能否在 v1 数据上运行；若不能，用 v1 分支自行实现 4096 词表 + 子分数头（工作量约 1 周）。
+## 4. 训练接入：通用适配器（已实现并通过单元测试，2026-09-18）
+
+代码：`conservative_negatives/train/negaug_agent.py`；配置：`configs/agent/ltf_negaug.yaml`；启动脚本：`scripts/run_negaug_finetune.sh`。
+
+```
+NegativeAugmentedAgent(host, label_path, lambda_neg, loss_kind, k, label_col, shuffle_seed, host_checkpoint, lr, ...)
+  get_sensor_config / get_feature_builders / forward / compute_trajectory / get_training_callbacks → 转发宿主
+  get_target_builders → 宿主的 + NegativeTargetBuilder（按 token 查 NegativeBank → negatives (K,8,3), neg_mask (K,)）
+  compute_loss        → 宿主损失 + λ(step)·SeparationLoss(pred["trajectory"], targets["trajectory"], negatives, neg_mask)
+  get_optimizers      → 宿主参数 + 可覆盖学习率（微调用 2e-5）
+  get_training_callbacks 追加 NegStatsCallback：把 loss_neg / neg_active_frac / lambda 写入 Lightning 日志
+```
+- **宿主代码零改动**；换宿主只改 `host:` 一段配置。PLUTO 需先包成 NAVSIM `AbstractAgent` 接口（Step 7）。
+- 负样本以 target 形式进入 NAVSIM 缓存（`<cache>/<log>/<token>/negative_targets.gz`），与特征一起复用；标签文件或 K 变化需 `force_cache_computation=true`。
+- 对照组：`agent.lambda_neg=0`（无分离损失）、`agent.shuffle_seed=<int>`（错位负样本，缓存名 `negative_targets_shuffled`）。
+- 微调起点：`host_checkpoint` 指向官方权重；Lightning 产出的 checkpoint 键为 `agent.host.*`，适配器的 `load_state_dict` 已处理，可直接被 `run_pdm_score.py agent=ltf_negaug agent.checkpoint_path=<ckpt>` 装载。
+- 单元测试结果（navtest 12 场景）：权重装入 missing 0 / unexpected 0；命中率 8/12 与标签一致；预训练 LTF 上 hinge 激活率 0.14–0.17（非零，R6 初步排除）；错位与 λ=0 分支正常；state_dict 回装 0 缺失。
+
+**λ 的量级**：宿主 `transfuser_loss` 的轨迹项带权重（见 `TransfuserConfig.trajectory_weight`），分离损失与轨迹 L1 同量纲。λ 应按轨迹项权重解读：`lambda_neg` 是相对宿主轨迹权重的比例，脚本内换算，见 §16.1。
 
 ## 5. 验收（对应研究计划 §6.4 / §7.4）
 - 至少一组 λ_neg 在 `navtest_interact` 子集上 EP 提升，且 NC / DAC / TTC 的 bootstrap 95% CI 下界 ≥ 基线均值。

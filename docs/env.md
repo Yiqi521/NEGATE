@@ -36,3 +36,7 @@
 - 场景标签路径 A 不可行（详见 decision_scene_tags.md），已切换路径 C 规则检测器：`conservative_negatives/scenes/rule_detector.py`，运行脚本 `scripts/mine_scenes.py`。
 - 200 场景冒烟测试（navtest）：unprotected_turn 4.0%，merging 7.0%，expert_stopped_t0 8.5%；nuPlan 的 `LaneConnector.turn_type()` 未实现，转向类型改由基线路径首尾航向差推断。
 - navtest 指标缓存：`$NAVSIM_EXP_ROOT/metric_cache`（运行中）。
+
+## 2026-09-18 决定
+- **navtrain 传感器数据不在本机下载**；最小验证实验在另一台 Blackwell（5060 / 5090）设备上执行，本机只负责：cu128 环境预构建与验证、打包、运行手册、对照标签。
+- 已启动的 `navtrain_current_1.tgz` 流式下载于 15:53 启动、约 16:20 按用户要求终止，残留部分解压已删除。
