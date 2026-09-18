@@ -16,7 +16,8 @@
 
 ## 1. 环境（约 30 分钟；Docker 约 5 分钟）
 两种方式任选：
-- **Docker**：`docker build -t negate:cu128 ~/E2E_planner`（或导入本机构建的镜像），`docker run --gpus all -it -v ~/navsim_workspace:/data -v ~/E2E_planner:/workspace/E2E_planner negate:cu128`。
+- **Docker**：`docker build -t negate:cu128 ~/E2E_planner`（约 25 分钟；或 `docker load` 本机导出的镜像）。运行时建议把工作区挂到**与生成 metric cache 的机器相同的绝对路径**，并用 `-e` 传四个环境变量：
+  `docker run --gpus all -it -v ~/navsim_workspace:/home/<本机用户>/navsim_workspace -v ~/E2E_planner:/workspace/E2E_planner -e OPENSCENE_DATA_ROOT=... -e NUPLAN_MAPS_ROOT=... -e NAVSIM_EXP_ROOT=... negate:cu128`；否则挂到 `/data` 后先跑一次 `scripts/relocate_metric_cache.py`。
 - **conda**：`conda env create -f ~/E2E_planner/environment-cu128.yml`；然后 `pip install --no-deps "nuplan-devkit @ git+https://github.com/motional/nuplan-devkit/@nuplan-devkit-v1.2"`；再 **`pip install --no-deps -e ~/navsim_workspace/navsim`**（必须带 `--no-deps`，否则 navsim 的 setup.py 会把 torch 钉回 2.0.1+cu117，Blackwell 上无法运行）；最后 `python -c "import torch; print(torch.__version__, torch.cuda.get_arch_list())"` 确认 2.7.1 与 sm_120。
 
 验收：
@@ -40,6 +41,9 @@ rsync -a <本机>:~/navsim_workspace/exp/metric_cache/  ~/navsim_workspace/exp/m
 rsync -a <本机>:~/navsim_workspace/exp/checkpoints/   ~/navsim_workspace/exp/checkpoints/                                          # 2 GB（官方 LTF 权重）
 ```
 重新下载的替代：`bash ~/navsim_workspace/dataset/download_test_camera_only.sh` + `run_metric_caching.py train_test_split=navtest`。
+
+**复制来的 metric cache 必须重定位路径**：其索引 CSV 记录的是本机绝对路径，复制后执行
+`python ~/E2E_planner/scripts/relocate_metric_cache.py ~/navsim_workspace/exp/metric_cache`（Docker 内路径不同时同样要做，或把工作区挂载到与本机相同的绝对路径）。
 
 验收：40 场景 dry-run 与本机结果一致
 ```bash
