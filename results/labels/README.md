@@ -7,6 +7,7 @@
 |---|---|---|
 | `negatives_navtest.parquet` | navtest 交互子集的保守负样本标签 | `python scripts/build_negatives.py --split navtest --flags results/labels/scene_flags_navtest.parquet --subset interact --objective --out <路径>` |
 | `negatives_navtrain.parquet` | navtrain 训练标签（同配置，4 分片后合并） | 同上，加 `--metric-cache $NAVSIM_EXP_ROOT/metric_cache_navtrain_interact --shard k/4`，再 `scripts/merge_shards.py` |
+| `negatives_{navtest,navtrain}_control_{random,safety}.parquet` | 完整实验对照组 D 的随机 / 安全负样本标签 | 同上加 `--control random` 或 `--control safety` |
 | `scene_flags_navtest.parquet` | 场景类别标志（规则检测器输出） | `python scripts/mine_scenes.py --split navtest --out <路径>` |
 | `scene_flags_navtrain.parquet` | 同上（navtrain） | 同上，`--split navtrain` |
 

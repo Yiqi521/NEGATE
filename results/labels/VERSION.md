@@ -11,6 +11,10 @@
 |---|---|---|---|---|
 | `negatives_navtest.parquet` | 1,045 | 2,783 | 742 | navtest v13 |
 | `negatives_navtrain.parquet` | 9,505 | 20,799 | 5,819 | navtrain v5（4 分片合并） |
+| `negatives_navtest_control_random.parquet` | 1,045 | 3,258 | 1,003 | 对照组：任意纵向扰动（速度 ×U(0.3,1.5) + 随机起步延迟），**不经 O1–O7** |
+| `negatives_navtest_control_safety.parquet` | 1,045 | 274 | 116 | 对照组：BeyondDrive 式安全负样本（复用 G1–G4/G3b 候选，只留回放 NC 或 TTC 失败者） |
+| `negatives_navtrain_control_random.parquet` | 9,505 | 25,741 | 8,513 | 同上（navtrain） |
+| `negatives_navtrain_control_safety.parquet` | 9,505 | 3,087 | 1,170 | 同上（navtrain） |
 | `scene_flags_navtest.parquet` | 12,146 | — | — | 规则检测器 v4 |
 | `scene_flags_navtrain.parquet` | 103,288 | — | — | 规则检测器 v4 |
 
@@ -26,3 +30,5 @@
 
 navtrain 对应版本：v1（纯回放）30,251 → v4（客观判据）28,666 → **v5（加 O7）20,799**，覆盖 5,819 / 9,505 场景。
 O7 在 navtrain 上判为"谨慎有理由"的比例为 29.2%（直行穿越 55.3%、无保护转向 21.5%、汇入 9.9%）。
+
+对照标签均由 `scripts/build_negatives.py ... --objective --control random|safety` 生成，`is_negative_strict` 列即标签；与正式标签在 (token, 算子, 参数) 上零重叠（已核验）。
