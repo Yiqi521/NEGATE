@@ -93,6 +93,9 @@ def main():
     ap.add_argument("--pet-safe", type=float, default=1.5, help="候选轨迹 PET 安全阈值 [s]")
     ap.add_argument("--future-frames", type=int, default=20)
     ap.add_argument("--no-occlusion", action="store_true", help="关闭 O7 遮挡可达性判据")
+    ap.add_argument("--control", default=None, choices=["random", "safety"],
+                    help="生成对照标签：random = 任意纵向扰动且不经 O1–O7 筛选；safety = 只保留 O1 回放失败（NC 或 TTC<1）的候选")
+    ap.add_argument("--control-seed", type=int, default=0)
     ap.add_argument("--occ-rho", type=float, default=1.0, help="O7 响应时间 [s]")
     ap.add_argument("--occ-vlim-factor", type=float, default=1.1, help="O7 幻影车速度 = factor × 车道限速")
     a = ap.parse_args()
@@ -195,7 +198,18 @@ def main():
                         fast_nc=fast.nc, fast_ttc=fast.ttc, fast_dac=fast.dac, c3_ref=("advance" if v0 < 0.5 else "scale"), ref_min_gap_s=ref_gap, exp_min_gap_s=exp_gap, c3_ref_safe=ref_safe, c3_gap_ok=gap_ok,
                         c3_replay=c3_replay, c3_pass=c3_pass,
                         **({k: v for k, v in obj.items() if k not in ("tracks", "conf_geo", "gaps_intervals", "expert_gap_interval", "t_c")} if obj else {}))
-            for c in generate_candidates(exp, conflict_clear_s=ccs, ego_speed_t0=v0):
+            cands = generate_candidates(exp, conflict_clear_s=ccs, ego_speed_t0=v0)
+            if a.control == "random":
+                # 随机对照：速度乘 U(0.3,1.5)（可快可慢）+ 随机起步延迟 U(0,2)s，与正式算子参数网格无交集
+                rng = np.random.default_rng(a.control_seed + int(tok[:8], 16) % 100000)
+                from conservative_negatives.generators.operators import Candidate, g1_delayed_departure
+                cands = []
+                for j in range(4):
+                    alpha = float(rng.uniform(0.3, 1.5)); delay = float(rng.uniform(0.0, 2.0)) if v0 < 0.5 else 0.0
+                    p = g2_speed_scale(exp, alpha)
+                    if delay > 0: p = g1_delayed_departure(p, round(delay * 2) / 2)
+                    cands.append(Candidate("RND", {"alpha": round(alpha, 3), "delay_s": round(delay, 2), "seed": a.control_seed}, p))
+            for c in cands:
                 r = dict(base, operator=c.operator, params=str(c.params))
                 r["kin_ok"] = kinematic_ok(c.poses)
                 if not r["kin_ok"]:
@@ -220,8 +234,15 @@ def main():
                     r["c3_cand"] = bool(e.safe() and expert_pet_ok and verdict["cand_unjustified"])
                     # O7：遮挡使谨慎有理由 → 该场景不产生负样本
                     r["c7_occ_ok"] = bool(not obj["occ_justified"])
-                    r["is_negative"] = bool(r["c1"] and r["c1_obj"] and r["c2"] and r["c3_cand"] and r["c4"] and r["c7_occ_ok"])
-                    r["is_negative_strict"] = bool(r["is_negative"] and c3_replay)
+                    if a.control == "random":
+                        # 不经 O1–O7 筛选，只要求运动学可行且与专家有差异（EP 比 ≠ 1）
+                        r["is_negative"] = bool(abs(ep_ratio - 1.0) > 0.05)
+                    elif a.control == "safety":
+                        # BeyondDrive 式安全负样本：回放中 NC 或 TTC 失败（危险），其余判据不管
+                        r["is_negative"] = bool(s.nc < 1.0 or s.ttc < 1.0)
+                    else:
+                        r["is_negative"] = bool(r["c1"] and r["c1_obj"] and r["c2"] and r["c3_cand"] and r["c4"] and r["c7_occ_ok"])
+                    r["is_negative_strict"] = bool(r["is_negative"] and (c3_replay or a.control is not None))
                 else:
                     r["is_negative"] = bool(r["c1"] and r["c2"] and c3_pass and r["c4"])
                 rows.append(r)

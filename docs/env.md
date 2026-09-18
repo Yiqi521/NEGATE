@@ -40,3 +40,24 @@
 ## 2026-09-18 决定
 - **navtrain 传感器数据不在本机下载**；最小验证实验在另一台 Blackwell（5060 / 5090）设备上执行，本机只负责：cu128 环境预构建与验证、打包、运行手册、对照标签。
 - 已启动的 `navtrain_current_1.tgz` 流式下载于 15:53 启动、约 16:20 按用户要求终止，残留部分解压已删除。
+
+## cu128 环境（Blackwell 兼容；2026-09-18 起）
+目的：5060 / 5090（sm_120）无法运行锁定的 torch 2.0.1+cu117（编译内核只到 sm_86）。在本机 4060（sm_89，cu128 轮子同样含其内核）预构建并验证，再打包到设备。
+
+| 项目 | cu117（现有 `navsim`） | cu128（`navsim-cu128`） |
+|---|---|---|
+| torch / CUDA | 2.0.1+cu117 / 11.7 | 2.7.1+cu128 / 12.8（cuDNN 9.7.1，NCCL 2.26.2） |
+| 编译架构 | sm_37…sm_86 | sm_75, sm_80, sm_86, sm_90, sm_100, **sm_120**, compute_120（Ada 以 sm_86 二进制运行，本机 4060 实测正常） |
+| 适配器测试 `tests/test_negaug_agent.py` | PASS：hit_rate 0.667，max_neg_active_frac 0.167，最后批 loss_host 26.09–26.83 | PASS：hit_rate 0.667，max_neg_active_frac 0.167，loss_host 26.78（一致） |
+| LTF 40 场景 dry-run PDMS | 0.9794 | 0.9794；逐 token PDMS 与 EP 最大差 0.0000 |
+| 显存峰值 batch 4/8/16/32（前向+反向+Adam） | 1.38 / 2.33 / 3.67 / 6.36 GB | 1.52 / 2.22 / 3.65 / 6.41 GB |
+| 步时 batch 32 | 0.99 s（含首步预热） | 0.51 s（预热后 3 步均值；两次测量口径不同，仅说明 cu128 不更慢） |
+| 训练冒烟（navtest 有负样本的 48 场景，2 epoch，batch 8 × 累积 4） | — | 通过：40 训练 / 8 验证样本；loss_neg 0.35，neg_active_frac 0.43–0.45，每批有效负样本 23.4，λ_eff 0.8 → 1.0；ckpt 与 latest.ckpt 链接生成 |
+| LTF 三种子 navtest 全量 PDMS | 84.1 / 83.1 / 83.3（均 83.5 ± 0.45） | 待填 |
+| 打包 | — | `environment-cu128.yml`、`requirements-cu128.txt`、`Dockerfile`（镜像 `negate:cu128`） |
+
+安装步骤（已脚本化于 Dockerfile；**顺序很重要**）：`conda create -n navsim-cu128 python=3.9` → `pip install -r requirements-cu128.txt`（navsim 依赖去掉 torch/torchvision 钉死行）→ `pip install --no-deps nuplan-devkit@v1.2` → **`pip install --no-deps -e navsim`** → **最后** `pip install torch==2.7.1 torchvision==0.22.1 --index-url https://download.pytorch.org/whl/cu128` → 断言 `torch.__version__` 以 2.7.1 开头且 `sm_120` 在架构列表中。
+
+**踩坑记录（2026-09-18）**：首次构建时先装 torch cu128、最后 `pip install -e navsim`，结果 navsim 的 `setup.py` 直接读取 `requirements.txt` 作为 `install_requires`，把 torch 卸载并钉回 2.0.1+cu117——环境看起来建成了，但 `torch.cuda.get_arch_list()` 仍无 sm_120。此时做的 40 场景一致性对比（0 差异）无效，已重做。
+
+**冒烟中发现并修复的三处工程问题**：(1) 官方训练配置无 `devices` 键，覆盖需写 `+trainer.params.devices=1`；(2) Lightning 的 ckpt 文件名含 `=`（`epoch=1-step=4.ckpt`）会破坏 Hydra 覆盖语法，训练脚本现在生成 `<run>/latest.ckpt` 链接供评估；(3) 标签文件必须与训练 split 一致（navtest 场景用 `negatives_navtest.parquet`），否则负样本命中为零而训练照常进行——适配器现在在 50 步内零命中时打印告警。

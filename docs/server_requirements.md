@@ -14,8 +14,8 @@
 | 项目 | 推荐 | 最低可行 | 依据（实测 / 官方） |
 |---|---|---|---|
 | GPU 数量 | **2** | 1 | 精简后主线 15–18 GPU·天；λ 筛选 → 补种子存在串行依赖，2 卡约 8–9 天，4 卡约 4.5–5 天，1 卡约 3 周 |
-| 单卡显存 | **24 GB**（RTX 4090 / RTX A5000 / L4 均可） | 16 GB | 本机实测 TransFuser batch 32 峰值 6.4 GB，官方 batch 64 外推约 13 GB；PLUTO 官方在 24 GB 卡上训练 |
-| GPU 架构 | **Ampere 或 Ada（sm_80–sm_89）** | 同 | 项目锁定 torch 2.0.1 + CUDA 11.7，编译内核只到 sm_86；Ada 可向下兼容运行。**Blackwell（RTX 5090 / B 系列）需重建环境到 torch ≥ 2.7 + CUDA 12.8 并重跑基线验收**，见第 4 节 |
+| 单卡显存 | **24 GB 以上**（RTX 4090 / A5000 / L4 / RTX 5090 32 GB 均可） | 16 GB | 本机实测 TransFuser batch 32 峰值 6.4 GB，官方 batch 64 外推约 13 GB；PLUTO 官方在 24 GB 卡上训练 |
+| GPU 架构 | **Ampere / Ada / Blackwell 均可**（sm_80–sm_120），驱动 ≥ 570 | 同 | 已准备两套环境：`navsim`（torch 2.0.1 + cu117，内核到 sm_86，Ampere/Ada 直接可用）与 `navsim-cu128`（torch 2.7.1 + cu128，含 sm_120，Blackwell 必需；本机已预构建并验证，见 `docs/env.md`）。Blackwell 32 GB 卡可两个小任务并行。cu128 需驱动 ≥ 570 |
 | CPU | **32 核 / 64 线程** | 16 核 | PDM 评分与特征缓存是 CPU 瓶颈：本机 22 线程缓存 12k 场景 25 分钟，4 线程评估 40 分钟/次；训练数据加载每卡需 8 个 worker |
 | 内存 | **128 GB** | 64 GB | NAVSIM 场景过滤把整个 split 的日志读入内存（navtrain 元数据 14 GB，展开约 30 GB）；PLUTO 特征缓存阶段多进程占用高 |
 | 存储 | **2 TB NVMe** | 1.5 TB | 见第 3 节：主线约 1.0 TB，PLUTO 支线约 0.5 TB，余量 0.5 TB |
@@ -26,6 +26,8 @@
 | 期限 | **2 个月** + 可选 2 个月延长 | 6 周 | 见第 7 节时间表 |
 
 **不需要的东西**：48 GB 以上显存（打分型规划器已改为条件触发）、NVLink（本规模 DDP 走 PCIe 足够）、InfiniBand、多节点。
+
+**5090 注意事项**：单卡 575 W，两张需 ≥ 1500 W 电源；消费卡无 NVLink 但本规模足够。
 
 ## 3. 存储预算
 
@@ -80,7 +82,7 @@
 
 | 項目 | 希望 | 最低 |
 |---|---|---|
-| GPU | 24 GB × 2 枚（RTX 4090 / A5000 / L4 相当、Ampere または Ada 世代） | 24 GB × 1 枚 |
+| GPU | 24 GB 以上 × 2 枚（RTX 4090 / A5000 / L4 / RTX 5090 のいずれも可）、ドライバ 570 以上 | 24 GB × 1 枚 |
 | CPU | 32 コア | 16 コア |
 | メモリ | 128 GB | 64 GB |
 | ストレージ | NVMe 2 TB | 1.5 TB |
@@ -90,15 +92,15 @@
 
 **根拠**：学習は計 63 回・約 15〜18 GPU 日（約 400 GPU 時間）。TransFuser の学習は公式で 1 GPU・日 / 回、VRAM 約 13 GB（実測外挿）。データは約 1.2 TB（NAVSIM 約 0.8 TB、nuPlan 検証・テスト分割 0.2 TB、特徴キャッシュ 0.2 TB）。GPU 2 枚で純学習約 9 日、評価・データ準備を含め約 2 週間半。
 
-**備考**：本プロジェクトは torch 2.0.1 + CUDA 11.7 に固定されており、Blackwell 世代（RTX 5090 等）では環境の再構築が必要となるため、Ampere / Ada 世代を希望する。sudo 権限は不要。学習済みモデルとコードは研究室リポジトリ（NEGATE）で管理する。
+**備考**：Ampere / Ada 世代向け（CUDA 11.7）と Blackwell 世代向け（CUDA 12.8）の 2 種類の実行環境を事前に構築・検証済みであり、いずれの GPU でも即日利用可能。sudo 権限は不要。学習済みモデルとコードは研究室リポジトリ（NEGATE）で管理する。
 
 ### 中文
 
-申请 2 张 24 GB 显存 GPU（RTX 4090 / A5000 / L4 级，Ampere 或 Ada 架构）、32 核 CPU、128 GB 内存、2 TB NVMe、1 Gbps 外网的 Linux 服务器，独占使用 2026 年 10 月至 11 月，可选延长至 2027 年 1 月。用途：在 NAVSIM / nuPlan 上为 TransFuser 与 PLUTO 附加保守负样本损失并训练评估，共约 63 次训练、15–18 GPU·天、数据约 1.2 TB。数据准备、负样本生成与评估工具已在笔记本上完成，仅训练无法在 8 GB 显存上进行。锁定的 torch 2.0.1 + CUDA 11.7 不支持 Blackwell 架构，故不申请 RTX 5090。
+申请 2 张 24 GB 显存 GPU（RTX 4090 / A5000 / L4 级，Ampere 或 Ada 架构）、32 核 CPU、128 GB 内存、2 TB NVMe、1 Gbps 外网的 Linux 服务器，独占使用 2026 年 10 月至 11 月，可选延长至 2027 年 1 月。用途：在 NAVSIM / nuPlan 上为 TransFuser 与 PLUTO 附加保守负样本损失并训练评估，共约 63 次训练、15–18 GPU·天、数据约 1.2 TB。数据准备、负样本生成与评估工具已在笔记本上完成，仅训练无法在 8 GB 显存上进行。已分别为 Ampere / Ada（CUDA 11.7）与 Blackwell（CUDA 12.8）准备并验证了运行环境，任一代 GPU 均可即用；Blackwell 需驱动 ≥ 570。
 
 ### English
 
-Request: a Linux server with 2 × 24 GB GPUs (RTX 4090 / A5000 / L4 class, Ampere or Ada), 32 CPU cores, 128 GB RAM, 2 TB NVMe and ≥ 1 Gbps network, for exclusive use October–November 2026 (optional extension to January 2027). Purpose: attach the proposed conservative-negative loss to TransFuser and PLUTO on the NAVSIM / nuPlan benchmarks and evaluate with 3 seeds and stratified metrics — about 63 training runs, 15–18 GPU-days, ≈ 1.2 TB of data. Data preparation, negative generation and evaluation tooling are complete on a laptop; only training exceeds its 8 GB GPU. The pinned torch 2.0.1 + CUDA 11.7 stack does not support Blackwell GPUs, so RTX 5090-class cards are not requested.
+Request: a Linux server with 2 × 24 GB GPUs (RTX 4090 / A5000 / L4 class, Ampere or Ada), 32 CPU cores, 128 GB RAM, 2 TB NVMe and ≥ 1 Gbps network, for exclusive use October–November 2026 (optional extension to January 2027). Purpose: attach the proposed conservative-negative loss to TransFuser and PLUTO on the NAVSIM / nuPlan benchmarks and evaluate with 3 seeds and stratified metrics — about 63 training runs, 15–18 GPU-days, ≈ 1.2 TB of data. Data preparation, negative generation and evaluation tooling are complete on a laptop; only training exceeds its 8 GB GPU. Two validated environments are prepared (CUDA 11.7 for Ampere/Ada, CUDA 12.8 for Blackwell), so any of these GPU generations can be used immediately; Blackwell requires driver ≥ 570.
 
 ## 7. 使用期间的时间表（2 卡）
 

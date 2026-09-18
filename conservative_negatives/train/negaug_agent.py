@@ -95,6 +95,7 @@ class NegativeAugmentedAgent(AbstractAgent):
         self._lambda, self._warmup_frac, self._total_steps = float(lambda_neg), warmup_frac, max(1, int(total_steps))
         self._lr, self._traj_key = lr, trajectory_key
         self._step = 0
+        self._cum_valid_negs = 0.0
         self.last_neg_stats: Dict[str, float] = {}
         if host_checkpoint:                               # 微调：先把宿主权重装进去
             self._load_host_checkpoint(host_checkpoint)
@@ -152,6 +153,11 @@ class NegativeAugmentedAgent(AbstractAgent):
         mask = targets["neg_mask"].bool().to(pred.device)
         loss_neg, stats = self._sep(pred, expert, negs, mask)
         total = host_loss + lam * loss_neg
+        self._cum_valid_negs += float(stats.get("n_valid_negs", 0.0))
+        if self._step == 50 and self._cum_valid_negs == 0.0:
+            print("[NegAug][WARN] 50 步内没有任何有效负样本：请检查 label_path 是否与训练 split 匹配"
+                  "（navtest 场景需 negatives_navtest.parquet，navtrain 需 negatives_navtrain.parquet）、"
+                  "以及缓存是否用 force_cache_computation=true 重建。")
         self.last_neg_stats = {"loss_host": float(host_loss.detach()), "loss_neg": float(loss_neg.detach()),
                                "lambda_eff": lam, "loss_neg_weighted": float((lam * loss_neg).detach()),
                                **{k: float(v) for k, v in stats.items()}}

@@ -18,7 +18,10 @@
 | `conservative_negatives/definition/occlusion.py` | 客观判据 O7：遮挡可达性（幻影车），处理"看不见的来车方向" |
 | `conservative_negatives/tracking.py` | 实验追踪：零依赖本地记录 + 可选 TensorBoard / W&B / MLflow 镜像 |
 | `conservative_negatives/train/negaug_agent.py` | **通用适配器**：给任意 NAVSIM 智能体附加负样本目标与分离损失（宿主零改动） |
-| `configs/agent/ltf_negaug.yaml` | 适配器 × LTF 的 Hydra 配置（λ、损失形式、错位对照、微调起点） |
+| `configs/agent/ltf_negaug.yaml` / `tf_negaug.yaml` | 适配器 × LTF（纯相机）/ TransFuser（含激光雷达）的 Hydra 配置 |
+| `tests/test_negaug_agent.py` | 适配器端到端测试（权重装入、缓存、损失、对照分支、ckpt 回装） |
+| `Dockerfile` / `environment-cu128.yml` / `requirements-cu128.txt` | Blackwell 兼容环境（torch 2.7.1 + CUDA 12.8），同时支持 Ampere / Ada |
+| `docs/minimal_experiment_runbook.md` | **最小验证实验运行手册**（面向 5060 / 5090 设备，含数据获取、命令、检查点、回退） |
 | `results/labels/` | **稳定标签目录**（下游一律引用这里的固定文件名） |
 | `configs/scene_filter/*.yaml` | 自动生成的子集 token 列表（可直接作 NAVSIM scene_filter） |
 | `configs/agent/ltf_camera_only.yaml` | 纯相机 LTF 的 Hydra 配置 |
@@ -37,7 +40,7 @@ export PYTHONPATH=$PWD                    # 使 conservative_negatives 可导入
 |---|---|---|
 | `scripts/precheck_scene_tags.py <log_dir>` | 检查日志 pickle 是否含场景类型字段 | 元数据 |
 | `scripts/mine_scenes.py --split navtest --out results/scene_flags_navtest.parquet` | 规则场景挖掘 | 元数据 + 地图 |
-| `scripts/build_negatives.py --split navtest --flags ... --subset interact --out ...` | 生成负样本候选并做 C1–C4 过滤 | metric cache |
+| `scripts/build_negatives.py ... --objective [--control random\|safety]` | 生成负样本并做 O1–O7 过滤；`--control` 生成随机 / 安全负样本对照标签 | metric cache |
 | `scripts/render_review_sample.py` | 为人工抽检样本渲染 BEV 图 | 元数据 + 地图 |
 | `scripts/eval_ltf_navtest.sh <seed>` | 官方 LTF 权重在 navtest 上的基线评估 | 相机 blob + metric cache |
 | `scripts/build_finetune_subset.py` | 按本地已下载日志构建微调子集（交互 + 背景）并生成 scene_filter | 元数据 + 标签 |

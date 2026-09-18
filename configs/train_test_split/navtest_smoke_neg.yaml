@@ -1,0 +1,4 @@
+defaults:
+  - scene_filter: navtest_smoke_neg
+
+data_split: test

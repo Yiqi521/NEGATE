@@ -1,0 +1,33 @@
+# 通用适配器 × TransFuser（相机 + 激光雷达；服务器上用，需 navtest/navtrain 激光雷达数据）
+_target_: conservative_negatives.train.negaug_agent.NegativeAugmentedAgent
+_convert_: 'all'
+
+host:
+  _target_: navsim.agents.transfuser.transfuser_agent.TransfuserAgent
+  _convert_: 'all'
+  config:
+    _target_: navsim.agents.transfuser.transfuser_config.TransfuserConfig
+    _convert_: 'all'
+    trajectory_sampling:
+      _target_: nuplan.planning.simulation.trajectory.trajectory_sampling.TrajectorySampling
+      _convert_: 'all'
+      time_horizon: 4
+      interval_length: 0.5
+    latent: False
+  checkpoint_path: null
+  lr: 1e-4
+
+host_checkpoint: ${oc.env:NAVSIM_EXP_ROOT}/checkpoints/transfuser/transfuser_seed_0.ckpt   # 微调起点；从头训时置 null
+label_path: ${oc.env:CN_PROJECT_ROOT}/results/labels/negatives_navtrain.parquet
+label_col: is_negative_strict
+k: 4
+lambda_neg: 0.1
+lambda_scale: null
+loss_kind: hinge
+margin: 1.0
+temperature: 1.0
+warmup_frac: 0.2
+total_steps: 24000
+shuffle_seed: null
+lr: 2e-5                   # 微调；从头训时置 null 以沿用宿主 1e-4
+checkpoint_path: null

@@ -17,18 +17,37 @@
 - navtest 传感器 blob：223 GB（`download/download_test.sh`；本机只有相机部分）
 - 地图 + 元数据：同本机（约 20 GB）
 
-## 3. 服务器上的执行顺序
+## 3. 服务器上的执行顺序（按研究计划 §16.2 的 A–G 组）
+
+前提：最小验证实验（`docs/minimal_experiment_runbook.md`）四条标准全过。
+
 ```bash
-# 0) 环境（与本机一致）
-git clone -b v1.1 https://github.com/autonomousvision/navsim.git && cd navsim && git checkout 3e8291bfa89ff247231e0227778840cd0a036896
-conda env create --name navsim -f environment.yml && conda activate navsim && pip install -e .
-# 1) 基线复现（3 seeds），验收 PDMS 84.0 ± 1.0（TransFuser）/ 83.8（LTF）
-python $NAVSIM_DEVKIT_ROOT/navsim/planning/script/run_training.py agent=transfuser_agent experiment_name=baseline_tf_s0 train_test_split=navtrain
-python $NAVSIM_DEVKIT_ROOT/navsim/planning/script/run_pdm_score.py train_test_split=navtest agent=transfuser_agent agent.checkpoint_path=$CKPT experiment_name=baseline_tf_s0_eval
-# 2) 分层评估（用项目自带 scene_filter）
-python $NAVSIM_DEVKIT_ROOT/navsim/planning/script/run_pdm_score.py --config-dir $PROJ/configs train_test_split=navtest_unprotected_turn agent=transfuser_agent agent.checkpoint_path=$CKPT experiment_name=baseline_tf_s0_turn
-# 3) 负样本训练（Step 4）：接入 conservative_negatives/losses/separation_loss.py，见第 4 节
+# 0) 环境（任选：navsim = cu117 Ampere/Ada；navsim-cu128 = Blackwell 亦兼容 Ampere/Ada）
+docker build -t negate:cu128 $PROJ    # 或 conda env create -f environment-cu128.yml
+# 1) 数据：元数据+地图 17 GB；navtest 223 GB（相机+激光雷达）；navtrain 300 GB（仅当前帧）；metric cache 可从本机复制
+# 2) 缓存：navtest metric cache；TransFuser 训练特征缓存（全量 navtrain，含激光雷达，约 4–8 h CPU）
+# 3) 验收：官方 TransFuser 权重 navtest PDMS 84.0 ± 1.0（cu128 环境下重跑三种子作为正式基线）
 ```
+
+| 组 | 内容 | 命令要点 | 次数 |
+|---|---|---|---|
+| A 从头训锚点 | TransFuser（含激光雷达）官方配置全量 100 epoch：基线 3 种子 + 最优 λ 3 种子 | `run_training.py agent=transfuser_agent`（基线）；`agent=tf_negaug agent.host_checkpoint=null agent.lambda_neg=<best>`（处理组，需新建 `configs/agent/tf_negaug.yaml`：host 换为 `TransfuserAgent`，其余同 ltf_negaug） | 6 |
+| B λ 筛选 | 交互富集子集约 3 万帧（`build_finetune_subset.py --bg-ratio 2` 在全量 navtrain 上），微调 15 epoch，λ ∈ {0.05, 0.1, 0.2, 0.3} 单种子 | `run_negaug_finetune.sh ft_lam<λ> <λ>`，`SPLIT=navtrain_full_ft EPOCHS=15 BS=64 ACC=1` | 4 |
+| C 补种子 | 最优与次优 λ 各补 2 种子 | 加 `seed=<s>` | 4 |
+| D 四个对照组 | λ=0；错位（`agent.shuffle_seed=<s>`）；随机负样本（`agent.label_path=results/labels/negatives_navtrain_control_random.parquet`）；安全负样本（`..._control_safety.parquet`）；各 3 种子 | 同 B 的脚本 | 12 |
+| E 三维消融 | 有无 O7（`label_path` 换 v12 标签）、`agent.loss_kind=infonce`、`agent.label_col=is_negative`（非严格） | 单种子筛 + 胜出补 2 种子 | 5 |
+| F 第二宿主 PLUTO | nuPlan 验证集交互场景微调（λ=0 / 最优 λ / 错位，各 3 种子），Test14 闭环评估 | 见 §4 PLUTO 包装 | 9 |
+| G 评估 | 每个 ckpt：`run_pdm_score`（navtest 全量）+ `behavior_metrics.py` + `stratified_pdms.py --baseline <λ=0 组> --behavior ...` | 见 §7 | 约 40 |
+
+## 4b. PLUTO 宿主包装的最小实现范围（Step 7）
+PLUTO 运行在 nuPlan devkit（矢量输入），NAVSIM 训练循环期望 `AbstractAgent` 接口。最小包装 `PlutoHostAgent(AbstractAgent)`：
+- `get_sensor_config` → `SensorConfig.build_no_sensors()`（不读传感器）。
+- `get_feature_builders` → 一个 `PlutoFeatureBuilder`：从 NAVSIM `AgentInput`/`Scene` 的地图 API 与标注框构造 PLUTO 的输入张量（自车历史、他车历史、地图折线、路线）。这是主要工作量（约 2–3 天），可复用 PLUTO 仓库 `feature_builder` 的几何代码，输入换成 NAVSIM 的 `Scene`。
+- `get_target_builders` → PLUTO 的目标（专家未来轨迹等）；适配器再追加 `NegativeTargetBuilder`（不变）。
+- `forward` → 调 PLUTO 模型，输出 dict 中放 `"trajectory"` (B,8,3)（PLUTO 输出 8 s @ 10 Hz，取前 4 s 每 0.5 s 采样）。
+- `compute_loss` → PLUTO 原损失（含其 CIL 对比项）；适配器叠加分离损失。`lambda_scale` 取 PLUTO 轨迹回归项的权重。
+- 闭环评估仍用 nuPlan devkit 的 `run_simulation.py`，加载微调后的 PLUTO 权重（从适配器 ckpt 中取 `host.*`）。
+替代路线（若包装工作量超预算）：直接在 PLUTO 仓库内实现 `NegativeTargetBuilder` 与损失叠加（约 1 天），但这样"适配器通用"的主张只在 NAVSIM 侧成立，需在论文中说明。
 
 ## 4. 训练接入：通用适配器（已实现并通过单元测试，2026-09-18）
 

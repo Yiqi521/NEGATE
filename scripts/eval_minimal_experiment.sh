@@ -7,8 +7,8 @@ PROJ=$(cd "$(dirname "$0")/.." && pwd); export PYTHONPATH=$PROJ:$PYTHONPATH; exp
 SPLIT=${SPLIT:-navtest_interact}; OUT=$PROJ/results/eval/minimal; mkdir -p $OUT
 CONTROL=$1
 for RUN in "$@"; do
-  CKPT=$(ls -t $NAVSIM_EXP_ROOT/$RUN/*/lightning_logs/version_*/checkpoints/*.ckpt 2>/dev/null | head -1)
-  [ -n "$CKPT" ] || { echo "no checkpoint for $RUN"; exit 1; }
+  CKPT=$NAVSIM_EXP_ROOT/$RUN/latest.ckpt      # 由 run_negaug_finetune.sh 生成的无 "=" 链接（Hydra 覆盖语法不允许 "="）
+  [ -e "$CKPT" ] || { echo "no latest.ckpt for $RUN（训练脚本末尾会创建）"; exit 1; }
   echo "== $RUN  ($CKPT) =="
   python $NAVSIM_DEVKIT_ROOT/navsim/planning/script/run_pdm_score.py --config-dir $PROJ/configs \
     train_test_split=$SPLIT agent=ltf_negaug agent.checkpoint_path=$CKPT agent.host_checkpoint=null agent.lambda_neg=0 \

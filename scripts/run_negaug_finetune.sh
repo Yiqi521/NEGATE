@@ -28,6 +28,8 @@ python $NAVSIM_DEVKIT_ROOT/navsim/planning/script/run_training.py --config-dir $
   cache_path=$NAVSIM_EXP_ROOT/negaug_cache_${SPLIT} force_cache_computation=${FORCE_CACHE:-false} \
   dataloader.params.batch_size=$BS dataloader.params.num_workers=6 \
   trainer.params.max_epochs=$EPOCHS trainer.params.accumulate_grad_batches=$ACC \
-  trainer.params.strategy=auto trainer.params.devices=1 trainer.params.precision=16-mixed \
+  trainer.params.strategy=auto +trainer.params.devices=1 trainer.params.precision=16-mixed \
   "$@" 2>&1 | tee $PROJ/results/train/${RUN}.log | grep -E "Epoch|neg_active|loss|Error|Traceback|Num training|Num validation|NegAug" | grep -v "it/s"
-echo "checkpoints:"; ls -t $NAVSIM_EXP_ROOT/$RUN/*/lightning_logs/version_*/checkpoints/*.ckpt 2>/dev/null | head -3
+# Lightning 的 ckpt 文件名含 "="（epoch=1-step=2.ckpt），会破坏 Hydra 覆盖语法；建一个不含 "=" 的 latest.ckpt 链接供评估脚本使用
+CK=$(ls -t $NAVSIM_EXP_ROOT/$RUN/*/lightning_logs/version_*/checkpoints/*.ckpt 2>/dev/null | head -1)
+if [ -n "$CK" ]; then ln -sfn "$CK" $NAVSIM_EXP_ROOT/$RUN/latest.ckpt; echo "checkpoint: $CK"; echo "symlink:    $NAVSIM_EXP_ROOT/$RUN/latest.ckpt"; else echo "no checkpoint produced"; fi
