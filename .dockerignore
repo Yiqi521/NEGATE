@@ -1,0 +1,10 @@
+.git
+results/review_png
+results/review_negatives_png
+results/audit_disagreement_png
+results/runs
+results/*shard*
+results/negatives_nav*_v*.parquet
+results/eval/*.log
+**/__pycache__
+*.png

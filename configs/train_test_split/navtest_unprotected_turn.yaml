@@ -1,0 +1,4 @@
+defaults:
+  - scene_filter: navtest_unprotected_turn
+
+data_split: test

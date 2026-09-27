@@ -1,0 +1,4 @@
+defaults:
+  - scene_filter: navtest_merging
+
+data_split: test

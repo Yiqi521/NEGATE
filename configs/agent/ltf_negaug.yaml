@@ -1,0 +1,33 @@
+# 通用适配器 × Latent TransFuser（纯相机）：保守负样本微调
+_target_: conservative_negatives.train.negaug_agent.NegativeAugmentedAgent
+_convert_: 'all'
+
+host:
+  _target_: conservative_negatives.agents.ltf_camera_only.LTFCameraOnlyAgent
+  _convert_: 'all'
+  config:
+    _target_: navsim.agents.transfuser.transfuser_config.TransfuserConfig
+    _convert_: 'all'
+    trajectory_sampling:
+      _target_: nuplan.planning.simulation.trajectory.trajectory_sampling.TrajectorySampling
+      _convert_: 'all'
+      time_horizon: 4
+      interval_length: 0.5
+    latent: True
+  checkpoint_path: null      # 推理时由 run_pdm_score 传 agent.checkpoint_path 覆盖为本适配器训练出的 ckpt
+  lr: 1e-4
+
+host_checkpoint: ${oc.env:NAVSIM_EXP_ROOT}/checkpoints/ltf/ltf_seed_0.ckpt   # 微调起点（官方权重）
+label_path: ${oc.env:CN_PROJECT_ROOT}/results/labels/negatives_navtrain.parquet
+label_col: is_negative_strict
+k: 4
+lambda_neg: 0.1            # 0 = 对照组；相对宿主轨迹项权重的比例，有效权重 = lambda_neg × lambda_scale
+lambda_scale: null         # null = 自动取宿主 config.trajectory_weight（TransFuser 为 10 → λ=0.1 的有效权重为 1.0）
+checkpoint_path: null      # 推理时由 run_pdm_score 传入本适配器训练出的 ckpt
+loss_kind: hinge           # hinge | infonce
+margin: 1.0
+temperature: 1.0
+warmup_frac: 0.2
+total_steps: 2250          # = 样本数 / batch × epoch；由训练脚本按实际子集覆盖
+shuffle_seed: null         # 整数 = 错位负样本对照
+lr: 2e-5                   # 微调学习率（覆盖宿主的 1e-4）
