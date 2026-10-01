@@ -1,116 +1,146 @@
-# 服务器配置申请（2026-09-18 修订版）
+# 服务器配置申请（2026-09-27 修订：分阶段申请）
 
-> 面向：实验室导师与设备管理者。第 6 节为可直接提交的一页申请文（日 / 中 / 英）。
-> 修订原因：实验矩阵已从 42 次训练（70–94 GPU·天）精简为约 57 次小任务（15–18 GPU·天），配置需求相应下调；所有数字均来自 2026-09-14/15 在本机的实测或官方文档，来源见第 5 节。
+> 面向：实验室导师与设备管理者。第 9 节为可直接提交的申请文（日 / 中 / 英）。
+> 修订原因：改为**分阶段申请**。本次只申请第一阶段，内容是必要的基本实验（TransFuser 微调、λ 筛选、两个对照，每臂 2 个种子，第 3 个种子留到第二阶段补），不到 1 GPU·天。从头训练锚点、第二宿主 PLUTO 与消融等第一阶段结果出来后再设计、另行申请。旧版（2026-09-18）按全部实验一次申请 2 × 24 GB GPU、2 个月，已作废；旧版中的实验矩阵也与研究计划 §16.2 不一致（写的是 63 次，§16.2 为 40 次），本版以 §16.2 为准。
 
-## 1. 一句话需求
+## 1. 一句话需求（第一阶段）
 
-**2 张 24 GB 显存 GPU（Ampere / Ada 架构）、32 核 CPU、128 GB 内存、2 TB NVMe、1 Gbps 外网、Ubuntu 22.04，独占使用 2 个月（2026-10-01 → 2026-11-30），可选延长至 2027-01-31 做补实验。**
+**1 张 24 GB 以上显存的 GPU（Ampere / Ada / Blackwell 均可）、32 核 CPU、128 GB 内存、1 TB 存储、≥ 1 Gbps 外网、Ubuntu 22.04，使用 4 周（2026-10-12 前后开始，日期可调）。GPU 实际占用约 17–22 小时，不需要独占，共享服务器上的配额即可。**
 
-若实验室能提供 4 张同规格 GPU，纯训练时间从约 9 天缩到约 5 天；若只能提供 1 张，仍可完成但需约 3 周且无法并行做消融。
+## 2. 分阶段总览
 
-## 2. 推荐配置与依据
+| 阶段 | 地点 | 内容 | 算力 | 时间 | 状态 |
+|---|---|---|---|---|---|
+| 0 最小验证实验 | 本机 RTX 5060 Ti 8 GB | LTF 单种子 4 次微调，只看方向（研究计划 §16.1，`docs/minimal_experiment_runbook.md`） | 本机约 9–13 h | 2026-10 上旬 | 待执行（需先装 WSL2） |
+| **1 基本实验（本次申请）** | 服务器 | TransFuser 微调：λ 筛选 + 最优 λ、λ=0、错位负样本对照各 2 种子 | **约 17–22 GPU·小时（不到 1 GPU·天）** | **4 周** | 本次申请 |
+| 2 扩展实验 | 服务器 | 按第一阶段结果设计（见第 7 节） | 参考约 12–15 GPU·天 | 届时另行申请 | — |
 
-| 项目 | 推荐 | 最低可行 | 依据（实测 / 官方） |
+阶段之间有判定门：第 0 阶段四条标准全过才进第一阶段；第一阶段的判定结果决定第二阶段做什么、要多少资源。
+
+## 3. 第一阶段实验内容
+
+宿主选 **TransFuser（相机 + 激光雷达）**：它是 NAVSIM 官方基线（PDMS 84.0），也是第二阶段从头训练锚点的宿主，第一阶段选出的 λ 可以直接沿用；纯相机的 LTF 已由第 0 阶段在本机覆盖。如改用 LTF，GPU 时间不变，存储可省约 100 GB（navtest 不需要激光雷达）。
+
+| 组 | 内容 | 次数 | 单次 | GPU 时间 | 为什么必要 |
+|---|---|---|---|---|---|
+| S0 验收 | 官方 TransFuser 权重 seed 0（即微调起点），在 cu128 环境下跑 navtest 全量 PDMS | 1 次评估 | 约 1 h | 约 1 h | 确认服务器流水线与官方一致（84.0 ± 1），作为本阶段的正式参照行 |
+| S1 λ 筛选 | 交互富集子集约 3 万帧（navtrain 交互场景 9,738 + 2 倍背景帧），从官方权重微调 15 epoch；λ ∈ {0, 0.05, 0.1, 0.2, 0.3} 单种子 | 5 | 1–1.5 h | 5–7.5 h | 剂量方向；选出最优 λ |
+| S2 补种子 | 最优 λ 与 λ=0 各补 1 个种子（合计各 2 种子） | 2 | 1–1.5 h | 2–3 h | 检查两个种子方向是否一致；λ=0 排除"多训几轮"的解释 |
+| S3 错位对照 | 最优 λ + 错位负样本（打乱 token 配对），2 种子 | 2 | 1–1.5 h | 2–3 h | 排除"损失项自身的正则化"的解释 |
+| S4 评估 | 9 个 checkpoint：navtest 全量 PDMS + 三个行为指标 + 分层配对比较 | 9 | 约 0.8 h | 约 7 h | 交互层看效果，全量看是否伤到其它场景 |
+| | **合计** | **9 次训练** | | **约 17–22 h（不到 1 GPU·天）** | |
+
+**种子策略**：第一阶段每臂 2 个种子，第 3 个种子留到第二阶段补齐。依据是各臂都从同一份官方权重出发，种子只影响数据顺序和 dropout，预计方差小于从头训练。作为参照，官方 LTF 三个从头训练的种子在 interact 层 PDMS 的标准差约 1.0 分（`docs/results_baseline.md`），与 1.5 分的效应量门槛接近；微调种子的方差尚未实测。因此加一条规则：若某一臂两个种子的效应方向相反，或种子间差异与效应量相当，当场补第 3 个种子（每臂 1–1.5 h），不等第二阶段。
+
+**第一阶段判定**（沿用研究计划 §16.2 的显著性标准，只取与本阶段对应的部分）：
+1. 工程：S0 落在官方值 ±1 以内；处理组的分离损失激活率在 warm-up 后 ≥ 1e-3。
+2. 效果：交互层上最优 λ 相对 λ=0 的间隙接受率与 EP 提升，帧级 bootstrap 95% CI 不含零（先对种子平均），且两个种子各自方向一致；NC / DAC / DDC / TTC 的 CI 下界不低于对照均值。
+3. 不伤全局：navtest 全量 PDMS 不低于 λ=0。
+4. 机制：错位对照的效应量显著小于处理组。
+
+**暂不做（留到第二阶段按结果决定）**：从头训练锚点、随机负样本与安全负样本两个对照、三维消融、PLUTO 迁移与 nuPlan 闭环。
+
+**开工前需补的工程项**（本机即可完成，不占服务器时间）：
+- `scripts/run_negaug_finetune.sh` 与 `scripts/eval_minimal_experiment.sh` 写死了 `agent=ltf_negaug`（行为指标的 `--agent-config` 也是），需加一个 `AGENT` 变量切到 `tf_negaug`。
+- `scripts/setup/` 目前只下载 LTF 权重、navtest 相机包和 navtrain 第 1 包，需补：官方 TransFuser 权重、navtrain 全量当前帧、navtest 激光雷达。
+- 在全量 navtrain 上生成微调子集：`build_finetune_subset.py --sensor-dir $OPENSCENE_DATA_ROOT/sensor_blobs/trainval --bg-ratio 2 --name navtrain_full_ft`。
+
+## 4. 第一阶段推荐配置
+
+| 项目 | 推荐 | 最低可行 | 依据 |
 |---|---|---|---|
-| GPU 数量 | **2** | 1 | 精简后主线 15–18 GPU·天；λ 筛选 → 补种子存在串行依赖，2 卡约 8–9 天，4 卡约 4.5–5 天，1 卡约 3 周 |
-| 单卡显存 | **24 GB 以上**（RTX 4090 / A5000 / L4 / RTX 5090 32 GB 均可） | 16 GB | 本机实测 TransFuser batch 32 峰值 6.4 GB，官方 batch 64 外推约 13 GB；PLUTO 官方在 24 GB 卡上训练 |
-| GPU 架构 | **Ampere / Ada / Blackwell 均可**（sm_80–sm_120），驱动 ≥ 570 | 同 | 已准备两套环境：`navsim`（torch 2.0.1 + cu117，内核到 sm_86，Ampere/Ada 直接可用）与 `navsim-cu128`（torch 2.7.1 + cu128，含 sm_120，Blackwell 必需；本机已预构建并验证，见 `docs/env.md`）。Blackwell 32 GB 卡可两个小任务并行。cu128 需驱动 ≥ 570 |
-| CPU | **32 核 / 64 线程** | 16 核 | PDM 评分与特征缓存是 CPU 瓶颈：本机 22 线程缓存 12k 场景 25 分钟，4 线程评估 40 分钟/次；训练数据加载每卡需 8 个 worker |
-| 内存 | **128 GB** | 64 GB | NAVSIM 场景过滤把整个 split 的日志读入内存（navtrain 元数据 14 GB，展开约 30 GB）；PLUTO 特征缓存阶段多进程占用高 |
-| 存储 | **2 TB NVMe** | 1.5 TB | 见第 3 节：主线约 1.0 TB，PLUTO 支线约 0.5 TB，余量 0.5 TB |
-| 外网 | **≥ 1 Gbps** | 300 Mbps | 需从 Hugging Face / AWS 拉取约 900 GB；本机实测 0.4 GB/min 下需 1.5 天，1 Gbps 下约 3 小时 |
-| 系统与驱动 | Ubuntu 22.04，NVIDIA 驱动 ≥ 535 | Ubuntu 20.04，驱动 ≥ 525 | CUDA 11.7 运行时向后兼容新驱动 |
-| 软件 | conda、git、tmux、rsync；可选 Docker | 同 | 环境定义已固化（`docs/env.md`） |
-| 账户 | 普通用户 + 50 GB home；数据盘可写 | 同 | 不需要 sudo |
-| 期限 | **2 个月** + 可选 2 个月延长 | 6 周 | 见第 7 节时间表 |
+| GPU | **1 张，≥ 24 GB**：RTX 4090 / RTX 5090 / RTX 6000 Ada / L40S / A100 | 1 张 16 GB（batch 32 × 梯度累积 2） | TransFuser batch 64 约 13 GB（实测 batch 32 为 6.4 GB 后外推）。A5000、L4 可用，但估计慢约一倍，本阶段仍可在几天内跑完 |
+| 驱动 | ≥ 535（Ampere / Ada）；Blackwell 需 ≥ 570 | 同 | 已准备并验证两套环境：cu117（到 sm_86）与 cu128（含 sm_120），见 `docs/env.md` |
+| CPU | 32 核 | 16 核 | 特征缓存与 PDM 评分是 CPU 瓶颈；训练数据加载约 8 个 worker |
+| 内存 | 128 GB | 64 GB | 按场景过滤会把整个 split 的日志读入内存（navtrain 元数据 14 GB，展开约 30 GB），另有多进程缓存 |
+| 存储 | **1 TB** | 700 GB | 见第 5 节，约 0.63 TB |
+| 外网 | ≥ 1 Gbps | 300 Mbps | 需从 Hugging Face / AWS 下载约 0.54 TB；1 Gbps 约半天，300 Mbps 约 4–8 小时起 |
+| 系统 | Ubuntu 22.04 | Ubuntu 20.04 | |
+| 账户 | 普通用户即可，不需要 sudo；可选 Docker | 同 | |
+| 期限 | **4 周** | 2 周 | 纯计算约 2–3 天，其余为数据准备、分析与重跑余量（第 6 节） |
 
-**不需要的东西**：48 GB 以上显存（打分型规划器已改为条件触发）、NVLink（本规模 DDP 走 PCIe 足够）、InfiniBand、多节点。
-
-**5090 注意事项**：单卡 575 W，两张需 ≥ 1500 W 电源；消费卡无 NVLink 但本规模足够。
-
-## 3. 存储预算
+## 5. 第一阶段存储预算
 
 | 内容 | 大小（GB） | 说明 |
 |---|---|---|
-| NAVSIM navtrain 传感器（仅当前帧） | 300 | 训练输入；缓存后可删原始文件回收 |
-| NAVSIM navtest 传感器（相机 + 激光雷达） | 223 | 评估输入；本机已有相机部分 121 GB 可 rsync 过去 |
+| navtrain 传感器（仅当前帧，相机 + 激光雷达） | 300 | 压缩包按日志打包，无法只下交互场景 |
+| navtest 传感器（相机 + 激光雷达） | 223 | 评估输入 |
 | OpenScene 元数据 + 地图 | 17 | |
-| TransFuser 特征缓存（10.3 万样本） | 100–150 | 估算：拼接相机 3×256×1024 + 激光雷达 BEV 256×256 |
-| metric cache（navtest + navtrain 交互子集） | 6 | 本机已生成，可直接复制 |
-| checkpoint（约 57 次 × 0.7 GB × 保留 2 个） | 80 | |
-| **NAVSIM 主线小计** | **约 750–800** | |
-| nuPlan 数据库：仅 val + test 分片（无传感器） | 约 180 | PLUTO 在 val 微调、Test14 闭环评估，不下 950 GB 的 train 分片 |
-| PLUTO 特征缓存 | 100–200 | 仅交互场景 |
-| **含 PLUTO 支线合计** | **约 1.1–1.2 TB** | |
-| 建议容量 | **2 TB** | 含解压临时空间与 30% 余量 |
+| 微调子集特征缓存（约 3 万帧，含负样本目标） | 30–45 | 按每帧约 1–1.5 MB 估算 |
+| navtest metric cache | 3 | 服务器上重新生成约 0.5 h |
+| checkpoint（9 次 × 约 0.7 GB） | 约 7 | |
+| 环境（Docker 镜像或 conda）、官方权重、日志 | 约 30 | 镜像 22.2 GB |
+| **合计** | **约 610–625** | 建议 1 TB，含解压临时空间与余量 |
 
-## 4. 算力预算（精简后的实验矩阵）
+## 6. 第一阶段时间表（1 张 24 GB 卡）
 
-| 组别 | 次数 | 单次（24 GB 卡） | GPU·天 | 说明 |
-|---|---|---|---|---|
-| TransFuser 从头训：基线 + 最优 λ，各 3 种子 | 6 | 约 30 h | 7.5 | 证明效果不是微调假象 |
-| TransFuser 微调：λ 四档单种子筛选 + 最优两档补种子 | 8 | 约 4.5 h | 1.5 | 剂量曲线 |
-| TransFuser 微调：三维消融（有无 O7、hinge/InfoNCE、严格/非严格标签）+ 补种子 | 7 | 约 4.5 h | 1.3 | |
-| PLUTO 微调：对照 + 处理组，各 3 种子 | 6 | 8–16 h | 3–4 | 跨规划器迁移（RQ3） |
-| 评估：PDMS 约 30 次 + nuPlan 闭环 6 次 | 36 | CPU 为主 | 约 2 | 可与训练并行 |
-| **合计** | **约 63** | | **15–18** | 约 400 GPU·小时 |
+| 周 | 内容 |
+|---|---|
+| 第 1 周 | 环境（约 0.5 天）；下载约 0.54 TB（0.5–1 天）；navtest metric cache、全量 navtrain 微调子集与特征缓存（约 3 h）；S0 验收（约 1 h） |
+| 第 2 周 | S1 λ 筛选 5 次（约 6 h）→ 选 λ；S2、S3 共 4 次（约 5 h）；S4 全部评估（约 7 h） |
+| 第 3 周 | 分层配对比较与 bootstrap、按第 3 节四条判定、失效样例出图；写第二阶段设计与申请 |
+| 第 4 周 | 余量：修 bug、重跑；若某臂两种子方向不一致，补第 3 个种子 |
 
-条件触发项（不计入申请）：若微调中分离损失激活率持续 < 1e-3（风险 R6），启用打分型规划器基线，追加约 6 GPU·天与 48 GB 显存需求，届时另行申请。
+若分到 A5000 / L4 级别的卡，第 2 周的计算量约翻倍，仍在 4 周内。
 
-## 5. 数字来源
+## 7. 第二阶段（参考，不在本次申请内）
 
-- 显存与步时：2026-09-18 本机 RTX 4060 Laptop（8 GB）用随机张量实测 TransFuser 前向 + 反向 + Adam，batch 4/8/16/32 峰值 1.4/2.3/3.7/6.4 GB，batch 64 溢出；步时 batch 32 约 1.0 s。24 GB 卡按算力比约 3.5 倍外推。
-- 官方训练成本：NAVSIM 论文 [9] "TransFuser: 1 GPU for 1 day on navtrain"；PLUTO 论文：4 × RTX 3090，100 万帧 25 epoch，22 h（无 CIL）/ 45 h（含 CIL）。
-- 数据规模：NAVSIM `docs/splits.md`（navtrain 445 GB 含历史帧 / 300 GB 仅当前帧；navtest 223 GB）；本机已下载 navtest 相机 121 GB 实测。
-- CPU 瓶颈：本机 metric caching 12,146 场景 25 min（22 线程）；PDMS 评估 40 min/seed（4 线程）。
-- 兼容性：`torch.cuda.get_arch_list()` 在锁定环境中返回 `['sm_37', …, 'sm_86']`；RTX 5090 为 sm_120。
+第二阶段的内容取决于第一阶段的判定：
 
-## 6. 提交用申请文
+| 第一阶段结果 | 第二阶段做什么 | 资源估计 |
+|---|---|---|
+| 四条全过 | 第一阶段三臂（最优 λ、λ=0、错位）各补第 3 个种子（3 × 1–1.5 h）；从头训练锚点（基线与最优 λ 各 3 种子，6 × 约 30 h，7.5 GPU·天）；随机 / 安全负样本对照与三维消融（约 0.5 GPU·天）；PLUTO 迁移与 nuPlan Test14 闭环（9 × 8–16 h，3–6 GPU·天）；评估约 1.5 GPU·天 | 约 12–15 GPU·天；2 × 24 GB GPU、2 TB、6–8 周（新增 nuPlan 验证 / 测试库约 180 GB、PLUTO 缓存 100–200 GB、全量 TransFuser 特征缓存 100–150 GB） |
+| 方向正确但不显著 | 每臂加 2–4 个种子，或扩大子集 / 延长 epoch | < 1 GPU·天，可沿用第一阶段资源 |
+| 分离损失激活率持续 < 1e-3（风险 R6） | 启用打分型规划器基线 | 约 6 GPU·天，需 48 GB 显存 |
+| 方向错误，或错位对照与处理组效应相当 | 不申请第二阶段，回本机修判据或损失设计 | — |
+
+## 8. 数字来源
+
+- 显存与步时：2026-09-18 在旧开发机 RTX 4060 Laptop（8 GB）上用随机张量实测 TransFuser 前向 + 反向 + Adam，batch 4/8/16/32 峰值 1.4/2.3/3.7/6.4 GB，batch 64 溢出；cu117 与 cu128 两套环境结果一致（`docs/env.md`）。
+- 单次微调约 1 h 的推算：NAVSIM 论文写的是 TransFuser 在 navtrain 上 "1 GPU for 1 day"（100 epoch × 约 10.3 万样本，论文未注明卡型），折合约 43 万样本 / 小时；第一阶段单次微调 3 万帧 × 15 epoch ≈ 45 万样本，约 1 h，按 1–1.5 h 预算。
+- 最小实验的对照值：7,000 帧 × 10 epoch 在 8 GB 卡上约 30–40 分钟（`docs/minimal_experiment_runbook.md`）。
+- 数据规模：NAVSIM `docs/splits.md`（navtrain 仅当前帧 300 GB；navtest 223 GB）；旧开发机实测 navtest 相机部分 121 GB。
+- CPU 瓶颈：旧开发机 metric caching 12,146 场景 25 min（22 线程）；LTF 全量 PDMS 评估 40 min / 种子（4 线程）。
+- 本机约束：RTX 5060 Ti 8 GB，C 盘剩余 374 GB（`docs/env.md` 末节），放不下第一阶段约 0.6 TB 的数据。
+
+## 9. 提交用申请文
 
 ### 日本語（提出用）
 
-**件名**：修士研究用 GPU サーバ利用申請
+**件名**：修士研究用 GPU サーバ利用申請（第 1 段階）
 
 **申請者**：SU Yiqi（37-255134）　**指導教員**：中野公彦 先生
 
 **研究課題**：Machine Learning-Based Human-Like Automated Driving Vehicle Behavior ― 「安全だが過度に保守的な」軌道を負例として利用するエンドツーエンド運転プランナの学習フレームワーク
 
-**目的**：NAVSIM / nuPlan ベンチマーク上で、既存プランナ（TransFuser、PLUTO）に提案する負例損失を付加して学習・評価し、進行性の向上と安全性の維持を 3 シード × 層別評価で検証する。データ準備・負例生成・評価ツールはすでにノート PC 上で完成しており、残るのは学習のみである（ノート PC は GPU 8 GB のため学習不可）。
+**段階的な申請について**：本申請は第 1 段階（基本検証）のみを対象とします。第 1 段階の結果を踏まえて後続の実験（ゼロからの学習、別プランナへの転移、アブレーション）を設計し、必要な計算資源はその時点で改めて申請します。
+
+**第 1 段階の内容**：NAVSIM ベンチマーク上で、公開されている TransFuser の学習済み重みに提案手法の負例損失を付加してファインチューニングします。損失重みを 5 水準で比較したうえで、損失なし（λ=0）および負例の対応をシャッフルした対照と 2 シードずつ比較し（3 シード目は第 2 段階で追加）、交差点・合流などの相互作用場面で安全性を損なわずに過度な保守性が低減されるかを検証します。学習は計 9 回（各約 1 時間）です。データ準備・負例生成・評価ツールは完成済みですが、ノート PC（GPU 8 GB、空きディスク 374 GB）では全量データ（約 0.6 TB）を扱えません。
 
 **希望構成**
 
 | 項目 | 希望 | 最低 |
 |---|---|---|
-| GPU | 24 GB 以上 × 2 枚（RTX 4090 / A5000 / L4 / RTX 5090 のいずれも可）、ドライバ 570 以上 | 24 GB × 1 枚 |
+| GPU | 24 GB 以上 × 1 枚（RTX 4090 / RTX 5090 / RTX 6000 Ada / L40S / A100 など） | 16 GB × 1 枚 |
 | CPU | 32 コア | 16 コア |
 | メモリ | 128 GB | 64 GB |
-| ストレージ | NVMe 2 TB | 1.5 TB |
+| ストレージ | 1 TB | 700 GB |
 | ネットワーク | 1 Gbps 以上 | 300 Mbps |
-| OS | Ubuntu 22.04、NVIDIA ドライバ 535 以上 | Ubuntu 20.04 |
-| 利用期間 | 2026 年 10 月 1 日 〜 11 月 30 日（延長の場合 2027 年 1 月末まで） | 6 週間 |
+| OS | Ubuntu 22.04、NVIDIA ドライバ 535 以上（Blackwell 世代は 570 以上） | Ubuntu 20.04 |
+| 利用期間 | 2026 年 10 月 12 日頃から 4 週間（開始日は調整可） | 2 週間 |
 
-**根拠**：学習は計 63 回・約 15〜18 GPU 日（約 400 GPU 時間）。TransFuser の学習は公式で 1 GPU・日 / 回、VRAM 約 13 GB（実測外挿）。データは約 1.2 TB（NAVSIM 約 0.8 TB、nuPlan 検証・テスト分割 0.2 TB、特徴キャッシュ 0.2 TB）。GPU 2 枚で純学習約 9 日、評価・データ準備を含め約 2 週間半。
+**所要計算量**：GPU 使用は約 17〜22 時間（1 GPU 日未満）で、専有は不要です。共有サーバ上での利用でも実施できます。
 
-**備考**：Ampere / Ada 世代向け（CUDA 11.7）と Blackwell 世代向け（CUDA 12.8）の 2 種類の実行環境を事前に構築・検証済みであり、いずれの GPU でも即日利用可能。sudo 権限は不要。学習済みモデルとコードは研究室リポジトリ（NEGATE）で管理する。
+**備考**：Ampere / Ada / Blackwell のいずれの世代にも対応する実行環境を構築・検証済みで、sudo 権限は不要です。コードは研究室リポジトリ（NEGATE）で管理します。第 2 段階の概算（第 1 段階の結果次第）は GPU 24 GB × 2 枚、ストレージ 2 TB、6〜8 週間、約 12〜15 GPU 日です。
 
 ### 中文
 
-申请 2 张 24 GB 显存 GPU（RTX 4090 / A5000 / L4 级，Ampere 或 Ada 架构）、32 核 CPU、128 GB 内存、2 TB NVMe、1 Gbps 外网的 Linux 服务器，独占使用 2026 年 10 月至 11 月，可选延长至 2027 年 1 月。用途：在 NAVSIM / nuPlan 上为 TransFuser 与 PLUTO 附加保守负样本损失并训练评估，共约 63 次训练、15–18 GPU·天、数据约 1.2 TB。数据准备、负样本生成与评估工具已在笔记本上完成，仅训练无法在 8 GB 显存上进行。已分别为 Ampere / Ada（CUDA 11.7）与 Blackwell（CUDA 12.8）准备并验证了运行环境，任一代 GPU 均可即用；Blackwell 需驱动 ≥ 570。
+申请一台 Linux 服务器用于硕士研究的第一阶段基本实验：1 张 24 GB 以上显存的 GPU（RTX 4090 / 5090 / RTX 6000 Ada / L40S / A100 等，Ampere、Ada、Blackwell 均可）、32 核 CPU、128 GB 内存、1 TB 存储、≥ 1 Gbps 外网，自 2026 年 10 月 12 日前后起使用 4 周。内容：在 NAVSIM 上给官方 TransFuser 权重接入保守负样本损失并微调，5 档 λ 筛选后，与 λ=0 和错位负样本两个对照各做 2 种子比较（第 3 个种子在第二阶段补），共 9 次训练、GPU 约 17–22 小时，不需要独占。数据准备、负样本生成与评估工具已完成，但笔记本（8 GB 显存、剩余 374 GB 磁盘）放不下约 0.6 TB 的全量数据。第二阶段（从头训练、PLUTO 迁移、消融）将根据第一阶段结果设计后另行申请，参考规模为 2 × 24 GB GPU、2 TB、6–8 周。
 
 ### English
 
-Request: a Linux server with 2 × 24 GB GPUs (RTX 4090 / A5000 / L4 class, Ampere or Ada), 32 CPU cores, 128 GB RAM, 2 TB NVMe and ≥ 1 Gbps network, for exclusive use October–November 2026 (optional extension to January 2027). Purpose: attach the proposed conservative-negative loss to TransFuser and PLUTO on the NAVSIM / nuPlan benchmarks and evaluate with 3 seeds and stratified metrics — about 63 training runs, 15–18 GPU-days, ≈ 1.2 TB of data. Data preparation, negative generation and evaluation tooling are complete on a laptop; only training exceeds its 8 GB GPU. Two validated environments are prepared (CUDA 11.7 for Ampere/Ada, CUDA 12.8 for Blackwell), so any of these GPU generations can be used immediately; Blackwell requires driver ≥ 570.
+Request (phase 1 of a staged plan): a Linux server with 1 × GPU of at least 24 GB (RTX 4090 / 5090 / RTX 6000 Ada / L40S / A100; Ampere, Ada or Blackwell), 32 CPU cores, 128 GB RAM, 1 TB storage and ≥ 1 Gbps network, for 4 weeks starting around 12 October 2026. Purpose: fine-tune the official NAVSIM TransFuser weights with the proposed conservative-negative loss, screen five loss weights, then compare the best weight against two controls (no loss, shuffled negatives) with 2 seeds each (a third seed is added in phase 2) — 9 training runs, about 17–22 GPU-hours in total, so a shared server is sufficient. Data preparation, negative generation and evaluation tooling are complete, but the full data (≈ 0.6 TB) does not fit on the laptop (8 GB GPU, 374 GB free disk). Phase 2 (training from scratch, transfer to PLUTO, ablations) will be designed from the phase 1 results and requested separately; the current estimate is 2 × 24 GB GPUs, 2 TB and 6–8 weeks.
 
-## 7. 使用期间的时间表（2 卡）
+## 10. 备选方案：云 GPU
 
-| 周 | 内容 |
-|---|---|
-| 第 1 周 | 环境重建与验收（LTF 基线 PDMS 83.8 ± 1）、数据下载与特征缓存、λ 单种子筛选（4 次微调） |
-| 第 2–3 周 | 从头训基线与最优 λ 各 3 种子；同时补种子与三维消融；PLUTO 数据准备与缓存 |
-| 第 4–5 周 | PLUTO 微调 6 次与 Test14 闭环评估；全部 PDMS 与行为指标评估 |
-| 第 6–8 周 | 失效分析、补实验、结果打包；释放 GPU |
-
-## 8. 备选方案：云 GPU
-
-等价工作量约 400 GPU·小时（24 GB 卡）+ 2 TB 块存储 + 约 900 GB 入网流量。按供应商当时报价核算；入网流量通常免费。注意 NAVSIM 数据需从 Hugging Face 与 AWS S3 拉取，云实例的出网限制需提前确认。
+第一阶段等价于约 22 GPU·小时（24 GB 卡）+ 1 TB 块存储 + 约 0.54 TB 入网流量，按供应商当时报价核算；入网流量通常免费。数据下载在整个阶段中耗时最长，云实例的出网与磁盘限制需提前确认。

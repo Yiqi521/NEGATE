@@ -65,3 +65,26 @@
 **Docker 构建踩坑**：(1) Miniconda 默认频道在容器内要求先接受 Anaconda 服务条款，`conda create` 直接失败 → 改用 Miniforge 并 `--override-channels -c conda-forge`；(2) 构建期没有 GPU，`torch.cuda.get_arch_list()` 为空，不能在 Dockerfile 里断言 sm_120，只断言 torch 版本与 `torch.version.cuda == "12.8"`，架构检查放到运行时。
 镜像迁移：目标设备有网时直接 `docker build`（约 25 分钟）；无网时 `docker save negate:cu128 | gzip > negate_cu128.tar.gz`（约 10 GB）拷贝后 `docker load`。
 (3) OpenCV 需要系统库 `libgl1 libglib2.0-0 libsm6 libxext6`，基础镜像缺失会在导入时报 `libGL.so.1`；(4) metric cache 的索引 CSV 是绝对路径，容器挂载点不同或迁移到别的机器都要先跑 `scripts/relocate_metric_cache.py`。
+
+## 2026-09-27 新设备：RTX 5060 Ti（Windows 11），最小验证实验的执行机
+
+仓库以单次提交整体迁入（`3c8089a`）。本机就是 §16.1 与运行手册指定的 Blackwell 8 GB 设备。
+
+| 项目 | 值 | 对实验的含义 |
+|---|---|---|
+| 机型 | ASUS TUF Gaming T500MV | — |
+| GPU | RTX 5060 Ti 8 GB，sm_120，驱动 596.49（CUDA 13.2），WDDM，兼作显示输出 | 必须用 cu128 环境；显存与桌面共用，训练前关掉占 GPU 的程序 |
+| CPU / 内存 | i7-13620H 10 核 16 线程 / 32 GB | WSL 上限设为 24 GB（`~/.wslconfig`）；metric cache 预计约 40 分钟 |
+| 磁盘 | 单盘 C: 928 GB，剩余 374 GB | 数据 + 缓存约 245 GB，够用 |
+| 系统 | Windows 11 Pro 26200；到货时无 WSL、无 Docker；虚拟化已开 | 走 WSL2 + Ubuntu 22.04（`scripts/setup/README.md`） |
+| 数据 | 无 | 全部重新下载或从旧机 rsync |
+
+**到货检查（Windows 端，未装 WSL 前可做的部分）**
+- 标签完整性：`results/labels/` 下 6 个负样本表与 2 个场景标志表的场景数、strict 条数、覆盖场景数与 `results/labels/VERSION.md` 逐项一致。
+- GPU 与损失模块：用 Windows 现有 torch 2.11+cu130 在 5060 Ti 上跑 NegativeBank（navtrain：5,819 token，平均 3.27 条 / token）重建负样本，hinge 与 InfoNCE 两种分离损失前向与反向梯度有限。这只说明 sm_120 与本项目的纯 torch 代码可用，正式实验仍以 WSL 内的 torch 2.7.1+cu128 为准。
+- 下载地址：地图、两份元数据、navtest 相机包、navtrain 第 1 包、LTF 权重全部 HTTP 200，大小与 `scripts/setup/README.md` 表格一致。
+
+**迁移中发现并修复的问题**
+1. **行尾**：本地 `core.autocrlf=true` 且无 `.gitattributes`，Windows 检出后 101 个文本文件为 CRLF，包括全部 `.sh`。在 WSL 里运行会报 `$'\r': command not found`。已加 `.gitattributes`（`* text=auto eol=lf`）并重新检出，工作区全部为 LF。
+2. **误提交的缓存目录**：仓库根目录有个字面名为 `$NAVSIM_EXP_ROOT` 的目录（旧机上环境变量未展开），其中 120 个冒烟缓存文件被 git 跟踪。已移出跟踪并加入 `.gitignore`，文件仍留在磁盘上，确认无用后可手动删除。
+3. **旧机私有文件**：`~/navsim_workspace/env.sh` 与 `download_*.sh` 从未入库，但 README、运行手册和全部 `scripts/*.sh` 依赖它们。现已按官方 v1.1 下载脚本重写并收进 `scripts/setup/`，`bootstrap_wsl.sh` 会生成 `env.sh`，并把下载脚本链接到 `~/navsim_workspace/dataset/`，手册里的命令因此原样可用。

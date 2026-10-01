@@ -11,7 +11,7 @@
 | `conservative_negatives/agents/ltf_camera_only.py` | 纯相机 LTF 智能体（本机评估用） |
 | `conservative_negatives/losses/` | 分离损失（hinge / InfoNCE）与 NegativeBank 数据模块 |
 | `docs/server_handoff.md` | 服务器交接：需复制的数据、命令顺序、训练接入设计 |
-| `docs/server_requirements.md` | 服务器申请用需求配置（最低 / 推荐、存储与算力预算、中英日简述） |
+| `docs/server_requirements.md` | 服务器分阶段申请：第一阶段基本实验的配置（最低 / 推荐）、存储与算力预算、时间表、中英日申请文；第二阶段参考估计 |
 | `docs/results_baseline.md` | LTF 基线 3 种子分层结果与含义 |
 | `docs/objective_criteria.md` | 客观分类标准：判据体系、文献阈值、实证比较、迭代记录 |
 | `conservative_negatives/definition/objective_criteria.py` | 客观判据 O1–O6：间隙接受、PET、RSS、起步延迟（替代人工标注） |
@@ -22,6 +22,7 @@
 | `tests/test_negaug_agent.py` | 适配器端到端测试（权重装入、缓存、损失、对照分支、ckpt 回装） |
 | `Dockerfile` / `environment-cu128.yml` / `requirements-cu128.txt` | Blackwell 兼容环境（torch 2.7.1 + CUDA 12.8），同时支持 Ampere / Ada |
 | `docs/minimal_experiment_runbook.md` | **最小验证实验运行手册**（面向 5060 / 5090 设备，含数据获取、命令、检查点、回退） |
+| `scripts/setup/` | **新设备上线**：WSL2 一键环境（`bootstrap_wsl.sh`）、数据与权重下载脚本、metric cache；说明见 `scripts/setup/README.md` |
 | `results/labels/` | **稳定标签目录**（下游一律引用这里的固定文件名） |
 | `configs/scene_filter/*.yaml` | 自动生成的子集 token 列表（可直接作 NAVSIM scene_filter） |
 | `configs/agent/ltf_camera_only.yaml` | 纯相机 LTF 的 Hydra 配置 |
@@ -74,4 +75,6 @@ bash scripts/eval_ltf_navtest.sh 0
 - [x] navtest 相机 blob（121 GB，147 日志）就位于 `$OPENSCENE_DATA_ROOT/sensor_blobs/test`
 - [x] LTF 基线（3 seeds）：全量 PDMS 83.5 ± 0.45（官方 83.8）；分层结果与含义见 `docs/results_baseline.md`
 - [x] 客观判据替代人工标注：`scripts/build_negatives.py --objective`（HCM 间隙 + PET + 相对 RSS），一致性见 `eval/criteria_agreement.py`；人工只做分歧审计（可选）
+- [x] 2026-09-27 迁入 RTX 5060 Ti（Windows 11）设备：标签完整性与 sm_120 GPU 检查通过；修复 CRLF 行尾与误提交缓存目录；环境与下载脚本收进 `scripts/setup/`（见 `docs/env.md` 末节）
+- [ ] **下一步**：本机装 WSL2 → `scripts/setup/` 建环境与下载数据 → 运行手册 §5–§8 最小验证实验（4 次微调 + 评估 + DECISION.md）
 - [ ] G3 算子重设计；专家保守性标记入表；训练接入（需服务器）

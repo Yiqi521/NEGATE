@@ -1,0 +1,9 @@
+# 统一 LF：本项目的脚本在 Linux / WSL2 里运行，CRLF 会让 bash 报 $'\r': command not found
+* text=auto eol=lf
+*.bat text eol=crlf
+*.ps1 text eol=crlf
+*.parquet binary
+*.gz binary
+*.pdf binary
+*.png binary
+*.ckpt binary

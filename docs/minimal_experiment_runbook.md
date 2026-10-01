@@ -4,6 +4,8 @@
 
 前提：设备驱动 ≥ 570（`nvidia-smi` 首行 CUDA Version ≥ 12.8）。本机（4060）已完成 cu128 环境构建与验证，见 `docs/env.md`"cu128 环境"节。
 
+**Windows 11 设备（2026-09-27 起的 RTX 5060 Ti）**：先按 `scripts/setup/README.md` 装 WSL2 并运行 `bootstrap_wsl.sh`，它会完成本手册第 1 节，并把第 2–4 节用到的下载脚本链接到 `~/navsim_workspace/dataset/`，此后本手册命令原样可用。
+
 ## 0. 目录约定
 ```
 ~/navsim_workspace/

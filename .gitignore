@@ -57,3 +57,6 @@ results/runs/
 
 # 规划器逐场景评估原始 CSV 保留，运行日志不保留
 results/eval/*_run.log
+
+# 环境变量未展开时误建的目录（旧机上 "$NAVSIM_EXP_ROOT" 被当成字面路径）；实验产物应在 NAVSIM_EXP_ROOT 指向的目录里
+/$NAVSIM_EXP_ROOT/

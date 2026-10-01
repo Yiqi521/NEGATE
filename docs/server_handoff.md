@@ -21,6 +21,8 @@
 
 前提：最小验证实验（`docs/minimal_experiment_runbook.md`）四条标准全过。
 
+**2026-09-27 起分阶段**：第一阶段只跑 S0 验收与 B 组 λ 筛选，以及 C、D 组中最优 λ、λ=0、错位负样本各 2 种子（第 3 个种子在第二阶段补），宿主为 TransFuser（`tf_negaug`）。开工前需补的脚本与下载项见 `docs/server_requirements.md` 第 3 节。下表其余各组在第二阶段按结果再定。
+
 ```bash
 # 0) 环境（任选：navsim = cu117 Ampere/Ada；navsim-cu128 = Blackwell 亦兼容 Ampere/Ada）
 docker build -t negate:cu128 $PROJ    # 或 conda env create -f environment-cu128.yml
